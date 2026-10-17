@@ -306,3 +306,26 @@ class OverCorrectionTests(TestCase):
             "title": "A Valley Near 1.72 Earth Radii",
             "intro": "Silverman p = 0.018 for 3352 planets; valley at 1.72 (95% CI 1.667-1.824)."})
         self.assertEqual(log_problems(good, evidence), [])
+
+
+class BreakdownToolTests(TransactionTestCase):
+    def test_breakdown_counts_every_group_in_one_call(self):
+        import pandas as pd
+        from pydantic_ai import RunContext
+        from crew import agents, science
+        from crew.schemas import PopulationFilter
+        df, _ = science.load_snapshot()
+        mission = Mission.objects.create(question="Gap?")
+        deps = agents.CrewDeps(recorder=MissionRecorder(mission), df=df)
+        ctx = type("Ctx", (), {"deps": deps})()
+        window = [PopulationFilter(column="pl_rade", op="ge", value=1.0, reason="window"),
+                  PopulationFilter(column="pl_rade", op="le", value=4.0, reason="window")]
+        by_method = agents.breakdown_population(ctx, window, "disc_method")
+        self.assertGreater(by_method["counts"]["tran"], by_method["counts"]["rv"])
+        self.assertEqual(sum(by_method["counts"].values()) + by_method["missing"],
+                         by_method["total"])
+        by_period = agents.breakdown_population(ctx, window, "pl_orbper")
+        self.assertEqual(len(by_period["counts"]), 4)
+        self.assertIn(str(by_method["counts"]["tran"]), " ".join(deps.evidence))
+        bad = agents.breakdown_population(ctx, window, "nope")
+        self.assertIn("Unknown column", bad["error"])

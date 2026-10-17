@@ -29,7 +29,7 @@ POLICIES = {
     Gate.Name.PLAN_REVISION: {"decision": Gate.Status.APPROVED, "via": HARNESS},
     Gate.Name.PUBLISH: {"decision": Gate.Status.REJECTED, "via": HARNESS},
 }
-ALLOWED_TOOLS = {"load_snapshot", "data_card", "count_population", "column_summary",
+ALLOWED_TOOLS = {"load_snapshot", "data_card", "count_population", "column_summary", "breakdown_population",
                  "apply_filters", "synthetic_null", "analyze_radius_distribution",
                  "specification_curve", "negative_control"}
 

@@ -35,7 +35,7 @@ STATION_LIMITS = {
     "ops": UsageLimits(request_limit=4),
     "science": UsageLimits(request_limit=16, tool_calls_limit=10),
     # Room to re-count the population under alternative filters (e.g. transit only)
-    "tactical": UsageLimits(request_limit=10, tool_calls_limit=6),
+    "tactical": UsageLimits(request_limit=12, tool_calls_limit=8),
     "log": UsageLimits(request_limit=4),
 }
 
@@ -162,6 +162,33 @@ def count_population(ctx: RunContext[CrewDeps], filters: list[PopulationFilter])
     return box["result"]
 
 
+def breakdown_population(ctx: RunContext[CrewDeps], filters: list[PopulationFilter],
+                         by: str) -> dict:
+    """Apply filters, then count the remaining planets in every group of one column at once.
+
+    Text columns (e.g. disc_method) are counted per value; numeric columns (e.g. pl_orbper)
+    per quartile range. Use this instead of one count_population call per group.
+    """
+    args = {"filters": [f.model_dump(exclude={"reason"}) for f in filters], "by": by}
+    with ctx.deps.recorder.tool(ctx.deps.recorder.current_station, "breakdown_population", args) as box:
+        try:
+            subset, steps = science.apply_filters(ctx.deps.df, args["filters"])
+            if by not in subset.columns:
+                raise science.InvalidFilter(f"Unknown column: {by}")
+            col = subset[by].dropna()
+            if pd.api.types.is_numeric_dtype(col):
+                groups = pd.qcut(col, 4, duplicates="drop").value_counts().sort_index()
+                counts = {f"{iv.left:.4g} to {iv.right:.4g}": int(n) for iv, n in groups.items()}
+            else:
+                counts = {str(k): int(v) for k, v in col.value_counts().head(10).items()}
+            box["result"] = {"total": len(subset), "by": by, "counts": counts,
+                             "missing": int(subset[by].isna().sum())}
+            ctx.deps.evidence.append(str(box["result"]))
+        except science.InvalidFilter as exc:
+            box["result"] = {"error": str(exc)}
+    return box["result"]
+
+
 def column_summary(ctx: RunContext[CrewDeps], column: str) -> dict:
     """Missing values, quantiles or top values for one column of the planet table."""
     df = ctx.deps.df
@@ -206,7 +233,8 @@ TACTICAL = """You are Tactical, the adversarial reviewer. Your job is to find re
 believe the result. Check for: selection bias from discovery method, circular use of
 inferred values, choosing filters after seeing results (p-hacking), low power, measurement
 error, and whether the conclusion holds across the whole precision-cut sweep or only at one
-setting. The negative control must find no valley; if it does, the method is broken.
+setting. To check a result across groups, use breakdown_population once (e.g. by disc_method
+or pl_orbper) rather than one count per group. The negative control must find no valley; if it does, the method is broken.
 Accept only if the conclusion survives. Ask for revision if a fixable flaw remains."""
 
 LOG = """You write the Captain's Log: a short public report of the mission for data
@@ -318,10 +346,11 @@ def check_plan_hazards(ctx: RunContext[CrewDeps], plan: AnalysisPlan) -> Analysi
 
 def build_crew(capabilities=()):
     science_officer = _agent("science_officer", AnalysisPlan, SCIENCE,
-                             tools=[count_population, column_summary], capabilities=capabilities,
+                             tools=[count_population, breakdown_population, column_summary],
+                             capabilities=capabilities,
                              retries=5)
     science_officer.output_validator(check_plan_hazards)
-    tactical = _agent("tactical", Review, TACTICAL, tools=[count_population],
+    tactical = _agent("tactical", Review, TACTICAL, tools=[breakdown_population, count_population],
                       capabilities=capabilities, retries=4)
     tactical.output_validator(check_review_numbers)
     captains_log = _agent("captains_log", CaptainsLog, LOG, capabilities=capabilities, retries=4)
