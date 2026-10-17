@@ -115,7 +115,7 @@ Any `.gguf` file in `~/models` (or `$CREW_MODELS_DIR`) appears in the bridge's m
 
 ### llama.cpp or MLX?
 
-The crew uses llama.cpp. Measured on an M1 (16 GB) with Qwen3.5-9B at 4-bit in each runtime, no prompt caching, 256 output tokens ([`scripts/benchmark_runtimes.py`](scripts/benchmark_runtimes.py), results in [`docs/runtime-benchmark.json`](docs/runtime-benchmark.json)):
+The crew uses llama.cpp. Measured on an M1 (16 GB) with Qwen3.5-9B at 4-bit in each runtime, no prompt caching, 256 output tokens ([`scripts/benchmark_runtimes.py`](scripts/benchmark_runtimes.py), results in [`docs/runtime-benchmark-apple-m1-16gb.json`](docs/runtime-benchmark-apple-m1-16gb.json)):
 
 | Workload | Runtime | First token | Generation | Total |
 |---|---|---|---|---|

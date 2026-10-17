@@ -6,7 +6,7 @@
 
 Runs each runtime's OpenAI-compatible server in turn (never both: memory), sends the
 same prompts, and reports time to first token, generation speed, total time, and
-whether a tool call comes back. Results print as a table and save to docs/.
+whether a tool call comes back. Results print as a table and save to docs/runtime-benchmark-<chip>-<memory>.json.
 MLX runs on Apple Silicon only.
 """
 import argparse
@@ -184,7 +184,11 @@ def main():
             w = r["workloads"][label]
             print(f"{label:24} {runtime:10} {w['time_to_first_token_s']:>11}s "
                   f"{str(w['generation_tokens_per_s']):>10} {w['total_s']:>7}s {w['end_to_end_tokens_per_s']:>17}")
-    out = REPO / "docs" / "runtime-benchmark.json"
+    # One file per machine, e.g. runtime-benchmark-apple-m1-16gb.json, so runs don't overwrite
+    mem_gb = round(int(subprocess.run(["sysctl", "-n", "hw.memsize"], capture_output=True,
+                                      text=True).stdout.strip() or 0) / 2**30)
+    chip = machine.split(" ", 1)[-1].lower().replace(" ", "-")
+    out = REPO / "docs" / f"runtime-benchmark-{chip}-{mem_gb}gb.json"
     out.write_text(json.dumps({"machine": machine, "date": time.strftime("%Y-%m-%d"),
                                "gguf": str(args.gguf.name), "mlx": str(args.mlx.name),
                                "output_tokens": OUTPUT_TOKENS, "results": results}, indent=2))
