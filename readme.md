@@ -113,6 +113,24 @@ Any `.gguf` file in `~/models` (or `$CREW_MODELS_DIR`) appears in the bridge's m
 | DeepSeek R1-0528 (Qwen3 8B distill, Q4_K_M) | `scripts/download-models.sh deepseek` | 5.0 GB | DeepSeek's newest model that fits a laptop (V4 Flash is 290B+ parameters). A reasoning model: about 12 tokens/s, but it thinks out loud, so it gets a 4,096-token response budget. Experimental in the crew. |
 | Test model | built in | none | Random schema-valid output; for rehearsing the flow and gates, not analysis |
 
+### llama.cpp or MLX?
+
+The crew uses llama.cpp. Measured on an M1 (16 GB) with Qwen3.5-9B at 4-bit in each runtime, no prompt caching, 256 output tokens ([`scripts/benchmark_runtimes.py`](scripts/benchmark_runtimes.py), results in [`docs/runtime-benchmark.json`](docs/runtime-benchmark.json)):
+
+| Workload | Runtime | First token | Generation | Total |
+|---|---|---|---|---|
+| Crew planning prompt (~1,000 tokens) | llama.cpp | 9.6 s | 10.2 tok/s | 34.6 s |
+| Crew planning prompt (~1,000 tokens) | MLX | 10.7 s | 11.7 tok/s | 32.5 s |
+
+MLX generates about 10–15% faster and reads prompts about 10% slower; end to end it was about 6% faster on the crew's prompt. Both return correct tool calls. On an M1 that's a modest gain; newer chips favor MLX more. Rerun it on your machine:
+
+```bash
+cd wagtail/LCARSAPP
+uv run --with mlx-lm python ../../scripts/benchmark_runtimes.py --gguf ~/models/Qwen3.5-9B-Q4_K_M.gguf --mlx ~/models/mlx/Qwen3.5-9B-4bit
+```
+
+(The MLX model is a separate download, e.g. `mlx-community/Qwen3.5-9B-4bit`.)
+
 ## Services and ports
 
 | Port | Service | Started by |

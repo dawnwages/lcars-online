@@ -1,0 +1,49 @@
+{
+  "machine": "arm64 Apple M1",
+  "date": "2026-10-17",
+  "gguf": "Qwen3.5-9B-Q4_K_M.gguf",
+  "mlx": "Qwen3.5-9B-4bit",
+  "output_tokens": 256,
+  "results": {
+    "llama.cpp": {
+      "load_seconds": 5.0,
+      "workloads": {
+        "short prompt": {
+          "time_to_first_token_s": 0.98,
+          "total_s": 24.7,
+          "output_tokens": 256,
+          "generation_tokens_per_s": 10.8,
+          "end_to_end_tokens_per_s": 10.4
+        },
+        "crew planning prompt": {
+          "time_to_first_token_s": 9.64,
+          "total_s": 34.6,
+          "output_tokens": 256,
+          "generation_tokens_per_s": 10.2,
+          "end_to_end_tokens_per_s": 7.4
+        }
+      },
+      "tool_call": "count_population"
+    },
+    "MLX": {
+      "load_seconds": 3.1,
+      "workloads": {
+        "short prompt": {
+          "time_to_first_token_s": 0.93,
+          "total_s": 22.6,
+          "output_tokens": 256,
+          "generation_tokens_per_s": 11.8,
+          "end_to_end_tokens_per_s": 11.3
+        },
+        "crew planning prompt": {
+          "time_to_first_token_s": 10.66,
+          "total_s": 32.5,
+          "output_tokens": 256,
+          "generation_tokens_per_s": 11.7,
+          "end_to_end_tokens_per_s": 7.9
+        }
+      },
+      "tool_call": "count_population"
+    }
+  }
+}
