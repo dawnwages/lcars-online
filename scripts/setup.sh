@@ -55,12 +55,17 @@ EOF
   ok "Created .env.local with a generated admin password and model key"
 else
   ok ".env.local already exists (kept)"
+  if ! grep -q '^CREW_MODEL_KEY=' .env.local; then
+    printf '# Key the local model server requires; the crew sends it automatically\nCREW_MODEL_KEY=%s\n' \
+      "$(uv run python -c 'import secrets; print(secrets.token_urlsafe(24))')" >> .env.local
+    ok "Added a generated CREW_MODEL_KEY to .env.local"
+  fi
 fi
 set -a; source .env.local; set +a
 
 uv run python manage.py migrate -v0
 ok "Database migrated"
-if uv run python manage.py shell -c "from django.contrib.auth import get_user_model as U; import sys; sys.exit(0 if U().objects.filter(username='$ADMIN_USERNAME').exists() else 1)" 2>/dev/null; then
+if uv run python manage.py shell --no-imports -c "from django.contrib.auth import get_user_model as U; import sys; sys.exit(0 if U().objects.filter(username='$ADMIN_USERNAME').exists() else 1)" 2>/dev/null; then
   ok "Admin user '$ADMIN_USERNAME' already exists"
 else
   DJANGO_SUPERUSER_PASSWORD="$ADMIN_PASSWORD" uv run python manage.py createsuperuser \
@@ -69,9 +74,9 @@ else
 fi
 
 if (( OFFLINE )); then
-  warn "Skipping NASA fetch (--offline); missions use the pinned 2026-10-07 baseline"
+  warn "Skipping NASA fetch (--offline); missions use the newest snapshot on disk, or the pinned 2026-10-07 baseline"
 elif uv run python manage.py ingest_archive >/dev/null 2>&1; then
-  ok "Fetched today's NASA Exoplanet Archive: $(uv run python manage.py shell -c 'from missions.models import Snapshot; print(Snapshot.latest_usable())' 2>/dev/null | tail -1)"
+  ok "Fetched today's NASA Exoplanet Archive: $(uv run python manage.py shell --no-imports -c 'from missions.models import Snapshot; print(Snapshot.latest_usable())' 2>/dev/null | tail -1)"
 else
   warn "Could not reach the NASA archive; missions use the pinned baseline. Retry: uv run python manage.py ingest_archive"
 fi

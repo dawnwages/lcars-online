@@ -26,12 +26,13 @@ start() {  # name, port, dir, command...
     echo "• $name: port $port is already in use; assuming it's running (scripts/stop.sh to restart)"
     return
   fi
-  (cd "$dir" && nohup "$@" > "$RUN/$name.log" 2>&1 & echo $! > "$RUN/$name.pid")
+  # Background only the service itself, so nothing keeps this script's output open
+  (cd "$dir" || exit 1; nohup "$@" > "$RUN/$name.log" 2>&1 < /dev/null & echo $! > "$RUN/$name.pid")
 }
 
 # Keep the Mac awake while services run (macOS only)
 if command -v caffeinate >/dev/null && ! [[ -f "$RUN/caffeinate.pid" && -n "$(ps -p "$(cat "$RUN/caffeinate.pid")" -o pid= 2>/dev/null)" ]]; then
-  nohup caffeinate -is > /dev/null 2>&1 & echo $! > "$RUN/caffeinate.pid"
+  nohup caffeinate -is > /dev/null 2>&1 < /dev/null & echo $! > "$RUN/caffeinate.pid"
 fi
 
 start prefect-server 4200 "$APP" uv run prefect server start
@@ -40,10 +41,10 @@ wait_for http://127.0.0.1:4200/api/health "Prefect server   http://127.0.0.1:420
 start django 8000 "$APP" uv run python manage.py runserver 8000
 wait_for http://localhost:8000/api/crew/status/ "Django           http://localhost:8000/admin"
 
-if pgrep -f "manage.py serve_ingest" >/dev/null; then
+if pgrep -f "$APP/.venv/bin/python manage.py serve_ingest" >/dev/null; then
   echo "• Data schedule already running"
 else
-  (cd "$APP" && nohup uv run python manage.py serve_ingest > "$RUN/serve-ingest.log" 2>&1 & echo $! > "$RUN/serve-ingest.pid")
+  (cd "$APP" || exit 1; nohup uv run python manage.py serve_ingest > "$RUN/serve-ingest.log" 2>&1 < /dev/null & echo $! > "$RUN/serve-ingest.pid")
   echo "✓ Data schedule    daily 06:00 America/New_York (log: run/serve-ingest.log)"
 fi
 
