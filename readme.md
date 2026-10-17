@@ -122,7 +122,7 @@ The crew uses llama.cpp. Measured on an M1 (16 GB) with Qwen3.5-9B at 4-bit in e
 | Crew planning prompt (~1,000 tokens) | llama.cpp | 9.6 s | 10.2 tok/s | 34.6 s |
 | Crew planning prompt (~1,000 tokens) | MLX | 10.7 s | 11.7 tok/s | 32.5 s |
 
-MLX generates about 10–15% faster and reads prompts about 10% slower; end to end it was about 6% faster on the crew's prompt. Both return correct tool calls. On an M1 that's a modest gain; newer chips favor MLX more. Rerun it on your machine:
+MLX generates about 9–15% faster and reads prompts about 10% slower; end to end it was about 6% faster on the crew's prompt. Both return correct tool calls. On an M1 that's a modest gain; newer chips favor MLX more. Rerun it on your machine:
 
 ```bash
 cd wagtail/LCARSAPP
