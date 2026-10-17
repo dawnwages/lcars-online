@@ -33,7 +33,8 @@ REQUEST_TIMEOUT = float(os.environ.get("CREW_REQUEST_TIMEOUT", "240"))
 STATION_LIMITS = {
     "ops": UsageLimits(request_limit=4),
     "science": UsageLimits(request_limit=16, tool_calls_limit=10),
-    "tactical": UsageLimits(request_limit=6, tool_calls_limit=3),
+    # Room to re-count the population under alternative filters (e.g. transit only)
+    "tactical": UsageLimits(request_limit=10, tool_calls_limit=6),
     "log": UsageLimits(request_limit=4),
 }
 
