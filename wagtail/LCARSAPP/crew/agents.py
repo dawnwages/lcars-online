@@ -3,7 +3,12 @@ import os
 from dataclasses import dataclass, field
 
 import pandas as pd
-from pydantic_ai import Agent, ModelRetry, NativeOutput, PromptedOutput, RunContext, ToolOutput
+from openai import AsyncOpenAI
+from pydantic_ai import (Agent, ModelRetry, NativeOutput, PromptedOutput, RunContext, ToolOutput,
+                         capture_run_messages)
+from pydantic_ai.exceptions import AgentRunError
+from pydantic_ai.messages import ModelResponse, TextPart, ToolCallPart
+from pydantic_ai.usage import UsageLimits
 from pydantic_ai.models.openai import OpenAIChatModel
 from pydantic_ai.providers.openai import OpenAIProvider
 
@@ -18,6 +23,17 @@ MODEL_NAME = "test" if MODEL_URL == "test" else os.environ.get("CREW_MODEL", "lo
 MODEL_KEY = os.environ.get("CREW_MODEL_KEY", "lcars-local")
 OUTPUT_MODE = os.environ.get("CREW_OUTPUT_MODE", "tool")  # tool | native | prompted (llama.cpp can't combine native with tools)
 TEMPERATURE = float(os.environ.get("CREW_TEMPERATURE", "0.2"))
+# Small local models can loop on long structured output; fail fast instead of for minutes
+MAX_TOKENS = int(os.environ.get("CREW_MAX_TOKENS", "1500"))
+REQUEST_TIMEOUT = float(os.environ.get("CREW_REQUEST_TIMEOUT", "240"))
+
+# Per-station budget for one run: model requests (incl. retries) and tool calls
+STATION_LIMITS = {
+    "ops": UsageLimits(request_limit=4),
+    "science": UsageLimits(request_limit=12, tool_calls_limit=6),
+    "tactical": UsageLimits(request_limit=6, tool_calls_limit=3),
+    "log": UsageLimits(request_limit=4),
+}
 
 OUTPUT_WRAPPERS = {"native": NativeOutput, "tool": ToolOutput, "prompted": PromptedOutput}
 
@@ -27,9 +43,11 @@ def make_model():
         # Schema-valid random output, for testing the flow without a model server
         from pydantic_ai.models.test import TestModel
         return TestModel(seed=0)
+    # No silent client retries: a timed-out request would otherwise run up to three times
+    client = AsyncOpenAI(base_url=MODEL_URL, api_key=MODEL_KEY, timeout=REQUEST_TIMEOUT, max_retries=0)
     return OpenAIChatModel(
-        MODEL_NAME, provider=OpenAIProvider(base_url=MODEL_URL, api_key=MODEL_KEY),
-        settings={"temperature": TEMPERATURE, "seed": 0})
+        MODEL_NAME, provider=OpenAIProvider(openai_client=client),
+        settings={"temperature": TEMPERATURE, "seed": 0, "max_tokens": MAX_TOKENS})
 
 
 @dataclass
@@ -183,13 +201,41 @@ def build_crew(capabilities=()):
     }
 
 
+def describe_failure(messages, limit=4000):
+    """What the model produced before a failed run, for the mission log."""
+    responses = [m for m in messages if isinstance(m, ModelResponse)]
+    last = responses[-1] if responses else None
+    produced = []
+    for part in (last.parts if last else []):
+        if isinstance(part, TextPart):
+            produced.append(part.content)
+        elif isinstance(part, ToolCallPart):
+            produced.append(f"{part.tool_name}({part.args_as_json_str()})")
+    text = "\n".join(produced)
+    return {
+        "model_requests": len(responses),
+        "tool_calls": [p.tool_name for r in responses for p in r.parts if isinstance(p, ToolCallPart)],
+        "last_finish_reason": getattr(last, "finish_reason", None),
+        "last_output_chars": len(text),
+        "last_output": text[:limit] + ("…[truncated]" if len(text) > limit else ""),
+    }
+
+
 def run_station(agent, station, prompt, deps: CrewDeps):
-    """Run one agent and log its output, token use and timing to the mission."""
+    """Run one agent within its budget; log its output, or what it produced if it failed."""
     import time
 
     deps.recorder.current_station = station
     start = time.monotonic()
-    result = agent.run_sync(prompt, deps=deps)
+    with capture_run_messages() as messages:
+        try:
+            result = agent.run_sync(prompt, deps=deps, usage_limits=STATION_LIMITS.get(station))
+        except AgentRunError as exc:
+            deps.recorder.log(
+                station, MissionEvent.Kind.ERROR, f"{agent.name} failed: {exc}"[:300],
+                payload=describe_failure(messages), model_name=MODEL_NAME,
+                duration_ms=int((time.monotonic() - start) * 1000))
+            raise
     usage = result.usage
     deps.recorder.log(
         station, MissionEvent.Kind.MODEL_OUTPUT, f"{agent.name} output",

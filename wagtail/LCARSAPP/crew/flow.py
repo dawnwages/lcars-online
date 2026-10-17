@@ -12,7 +12,7 @@ from django.utils import timezone
 from prefect import flow, get_run_logger
 from prefect.runtime import flow_run
 from pydantic_ai.durable_exec.prefect import PrefectDurability
-from pydantic_ai.exceptions import UnexpectedModelBehavior
+from pydantic_ai.exceptions import AgentRunError
 
 from crew import science
 from crew.agents import MODEL_NAME, CrewDeps, build_crew, hazard_checklist, number_hazards, run_station
@@ -189,11 +189,12 @@ def away_mission(mission_id: int, gate_policies: dict | None = None):
     except science.InsufficientSample as exc:
         rec.set_status(Mission.Status.FAILED, finished_at=timezone.now(),
                        verdict=f"No valid plan: {exc}")
-    except UnexpectedModelBehavior as exc:
+    except AgentRunError as exc:
+        # Invalid output after retries, an exceeded budget, or a timeout; details are logged
         rec.log(S.SYSTEM, K.ERROR, f"Model could not produce valid output: {exc}")
         rec.set_status(Mission.Status.FAILED, finished_at=timezone.now(),
-                       verdict=("No valid plan: the crew could not produce output that passes "
-                                "its checks (for example, answering every hazard) within its retries"))
+                       verdict=("The crew could not produce valid output within its limits "
+                                "(retries, tool calls, response length or time); see the log"))
     except GateRejected as exc:
         logger.info("Mission stopped at a gate: %s", exc)
     except Exception as exc:

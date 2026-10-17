@@ -10,6 +10,7 @@ import time
 
 from django.core.management.base import BaseCommand
 from django.utils import timezone
+from pydantic_ai import capture_run_messages
 from pydantic_ai.messages import RetryPromptPart, ToolCallPart
 
 from crew import agents, science
@@ -57,11 +58,15 @@ class Command(BaseCommand):
         def timed(agent, station, prompt):
             rec.current_station = station
             start = time.monotonic()
-            try:
-                result = agent.run_sync(prompt, deps=deps)
-            except Exception as exc:
-                rec.log(station, MissionEvent.Kind.ERROR, f"{agent.name} failed: {exc}"[:300])
-                return None, time.monotonic() - start, {}
+            with capture_run_messages() as messages:
+                try:
+                    result = agent.run_sync(prompt, deps=deps,
+                                            usage_limits=agents.STATION_LIMITS.get(station))
+                except Exception as exc:
+                    failure = agents.describe_failure(messages)
+                    rec.log(station, MissionEvent.Kind.ERROR, f"{agent.name} failed: {exc}"[:300],
+                            payload=failure, duration_ms=int((time.monotonic() - start) * 1000))
+                    return None, time.monotonic() - start, {"failure": failure}
             msgs = result.all_messages()
             meta = {
                 "retries": sum(isinstance(p, RetryPromptPart) for m in msgs for p in m.parts),

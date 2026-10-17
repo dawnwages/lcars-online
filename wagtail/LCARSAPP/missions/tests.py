@@ -233,3 +233,28 @@ class HazardRetryTests(TransactionTestCase):
         self.assertEqual({r.hazard_id for r in plan.hazard_responses}, {"H1", "H2"})
         returned = mission.events.get(title="Plan returned: hazards not answered")
         self.assertIn("H2", returned.rationale)
+
+
+class StationLimitTests(TransactionTestCase):
+    def test_runaway_tool_calls_are_stopped_and_logged(self):
+        """A planner that keeps calling tools (as Qwen did, 16 times) hits its budget."""
+        from pydantic_ai.exceptions import AgentRunError
+        from pydantic_ai.messages import ModelResponse, ToolCallPart
+        from pydantic_ai.models.function import FunctionModel
+        from crew import agents, science
+
+        def flailing(messages, info):
+            return ModelResponse(parts=[ToolCallPart("column_summary", {"column": "pl_rade"})])
+
+        df, _ = science.load_snapshot()
+        mission = Mission.objects.create(question="Gap?")
+        deps = agents.CrewDeps(recorder=MissionRecorder(mission), df=df, hazards=[])
+        crew = agents.build_crew()
+        with crew["science"].override(model=FunctionModel(flailing)):
+            with self.assertRaises(AgentRunError):
+                agents.run_station(crew["science"], "science", "Plan it", deps)
+        error = mission.events.get(kind="error")
+        self.assertIn("science_officer failed", error.title)
+        calls = error.payload["tool_calls"]
+        self.assertLessEqual(calls.count("column_summary"), 7)
+        self.assertGreater(error.payload["model_requests"], 1)
