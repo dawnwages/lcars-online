@@ -20,10 +20,24 @@ for name in lcars serve-ingest django prefect-server model-server mission caffei
   stop_pid "$name"
 done
 
-# Anything from this checkout that outlived its parent
-pkill -f "$REPO/wagtail/LCARSAPP/.venv/bin/python.* manage.py (runserver|serve_ingest|run_mission|bakeoff|red_team)" 2>/dev/null
-pkill -f "$REPO/wagtail/LCARSAPP/.venv/bin/.*prefect server start" 2>/dev/null
-pkill -f "$REPO/LCARS/node_modules/.bin/vite" 2>/dev/null
-pkill -f "$REPO/scripts/model-server.sh" 2>/dev/null
-pkill -f "llama-server .*--port 8089" 2>/dev/null
+# Anything from this checkout that outlived its parent. Every pattern is scoped to this
+# checkout's paths (or the crew's model port) so other projects' servers are untouched;
+# `uv run` wrappers exit on their own when their Python child stops.
+PATTERNS=(
+  "$REPO/wagtail/LCARSAPP/.venv/bin/python.* manage.py (runserver|serve_ingest|run_mission|bakeoff|red_team)"
+  "$REPO/wagtail/LCARSAPP/.venv/bin/.*prefect server start"
+  "$REPO/LCARS/node_modules/.bin/vite"
+  "$REPO/scripts/model-server.sh"
+  "llama-server .*--port 8089"
+)
+for p in "${PATTERNS[@]}"; do pkill -TERM -f "$p" 2>/dev/null; done
+
+# Some (Prefect's serve loop) ignore a polite stop; give them a moment, then insist
+for _ in 1 2 3 4 5; do
+  alive=0
+  for p in "${PATTERNS[@]}"; do pgrep -f "$p" >/dev/null && alive=1; done
+  (( alive )) || break
+  sleep 1
+done
+for p in "${PATTERNS[@]}"; do pkill -KILL -f "$p" 2>/dev/null; done
 echo "Done."
