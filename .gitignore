@@ -25,3 +25,4 @@ media/
 wagtail/LCARSAPP/run/
 wagtail/LCARSAPP/crew/data/snapshots/
 wagtail/LCARSAPP/backups/
+.deepeval/

@@ -21,6 +21,17 @@ BASE_DIR = os.path.dirname(PROJECT_DIR)
 # See https://docs.djangoproject.com/en/3.2/howto/deployment/checklist/
 
 
+# Per-machine secrets from .env.local (created by scripts/setup.sh), so every entry
+# point (runserver, management commands, Prefect runs) sees the same values
+_env_local = os.path.join(BASE_DIR, '.env.local')
+if os.path.exists(_env_local):
+    with open(_env_local) as _f:
+        for _line in _f:
+            _line = _line.strip()
+            if _line and not _line.startswith('#') and '=' in _line:
+                _key, _value = _line.split('=', 1)
+                os.environ.setdefault(_key.strip(), _value.strip())
+
 # Telemetry off for the agent tooling (these must be set before the packages are imported)
 os.environ.setdefault("DEEPEVAL_TELEMETRY_OPT_OUT", "YES")
 os.environ.setdefault("DEEPTEAM_TELEMETRY_OPT_OUT", "YES")

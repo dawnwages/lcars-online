@@ -5,6 +5,10 @@
 # so memory stays predictable on a 16 GB machine. Thinking budget defaults to 0.
 # Requires an API key (CREW_MODEL_KEY) so web pages in the browser cannot use it.
 set -e
+ENV_LOCAL="$(cd "$(dirname "$0")/.." && pwd)/wagtail/LCARSAPP/.env.local"
+if [ -z "${CREW_MODEL_KEY:-}" ] && [ -f "$ENV_LOCAL" ]; then
+  CREW_MODEL_KEY=$(grep '^CREW_MODEL_KEY=' "$ENV_LOCAL" | cut -d= -f2-)
+fi
 MODEL="${1:?path to a .gguf model}"
 BUDGET="${2:-0}"
 exec llama-server -m "$MODEL" --alias "$(basename "$MODEL" .gguf)" \
