@@ -21,12 +21,18 @@ BASE_DIR = os.path.dirname(PROJECT_DIR)
 # See https://docs.djangoproject.com/en/3.2/howto/deployment/checklist/
 
 
+# Telemetry off for the agent tooling (these must be set before the packages are imported)
+os.environ.setdefault("DEEPEVAL_TELEMETRY_OPT_OUT", "YES")
+os.environ.setdefault("DEEPTEAM_TELEMETRY_OPT_OUT", "YES")
+os.environ.setdefault("PREFECT_SERVER_ANALYTICS_ENABLED", "false")
+
 # Application definition
 
 INSTALLED_APPS = [
     'home',
     'search',
     'core',
+    'missions',
 
     'wagtail.contrib.forms',
     'wagtail.contrib.search_promotions',
@@ -72,6 +78,9 @@ MIDDLEWARE = [
 CORS_ALLOWED_ORIGINS = [
     "http://localhost:8080",
 ]
+# The LCARS bridge sends the admin session cookie to decide gates
+CORS_ALLOW_CREDENTIALS = True
+CSRF_TRUSTED_ORIGINS = ["http://localhost:8080"]
 
 ROOT_URLCONF = 'LCARSAPP.urls'
 
@@ -103,6 +112,13 @@ DATABASES = {
     'default': {
         'ENGINE': 'django.db.backends.sqlite3',
         'NAME': os.path.join(BASE_DIR, 'db.sqlite3'),
+        # Crew tools write mission events from worker threads while the web
+        # server reads them: wait for locks, and let readers and writers overlap
+        'OPTIONS': {
+            'timeout': 20,
+            'transaction_mode': 'IMMEDIATE',
+            'init_command': 'PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL;',
+        },
     }
 }
 

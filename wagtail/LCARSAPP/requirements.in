@@ -4,3 +4,14 @@ wagtail>=8.0,<8.1
 Django>=6.1,<6.2
 djangorestframework>=3.18
 django-cors-headers>=4.9
+
+# LCARS Online agent crew
+pydantic-ai-slim[openai,prefect]
+prefect>=3
+deepeval
+deepteam
+sentry-sdk  # imported by deepteam but not declared as a dependency
+pandas
+numpy
+scipy
+sqlalchemy<2.1  # Prefect 3.8 server scheduler fails on 2.1 bulk inserts

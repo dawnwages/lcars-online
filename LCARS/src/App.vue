@@ -11,8 +11,8 @@
         <LCARSBar align="left" :color-scheme="titleType">{{title}}</LCARSBar>
       </div>
       <div class="lcars-title large" :data-type="titleType">
-        <span class="short-title">{{title}}</span>
-        <span class="long-title">{{longTitle}}</span>
+        <span class="short-title">{{ chartOrPostType === 'missions' ? 'Mission Ops' : title }}</span>
+        <span class="long-title">{{ chartOrPostType === 'missions' ? 'Mission Operations' : longTitle }}</span>
       </div>
       <div class="sidebar-top">
         <div class="sidebar-block" v-on:click="enterFullscreen">{{displayLcarsLabel ? lcarsLabel : numbers[0]}}</div>
@@ -23,7 +23,12 @@
         </div>
       </div>
       <div class="sidebar-bottom">
-        <div class="sidebar-block">{{numbers[2]}}</div>
+        <div class="sidebar-block nav-block" :class="{ active: chartOrPostType === 'missions' }"
+             @click="showMissions">
+          Missions
+          <br/>
+          {{ pendingGates ? `${pendingGates} awaiting captain` : numbers[2] }}
+        </div>
         <div class="sidebar-block bgcolor-2">{{numbers[3]}}</div>
         <div class="sidebar-block bgcolor-6">{{numbers[4]}}</div>
         <div class="sidebar-block bgcolor-3">{{numbers[5]}}</div>
@@ -45,9 +50,10 @@
           <LCARSButton :blank="true" />
         </div>
       </div>
-      <div class="main-content">
+      <div class="main-content" :class="{ 'fills-screen': chartOrPostType === 'missions' }">
         <StarChart :type="starChartType" v-if="chartOrPostType === 'chart'"/>
-        <CoreList v-if="chartOrPostType !== 'chart'"/>
+        <CoreList v-if="chartOrPostType === 'post'"/>
+        <MissionLog v-if="chartOrPostType === 'missions'" @pending-gates="n => pendingGates = n"/>
       </div>
       <footer>
         <LCARSBar align="right" :color-scheme="titleType">
@@ -65,6 +71,7 @@ import LCARSBar from './common/LCARSBar.vue'
 import NumbersTable from './common/NumbersTable.vue'
 import StarChart from './pages/StarChart.vue'
 import CoreList from './pages/CoreList.vue'
+import MissionLog from './pages/MissionLog.vue'
 import { makeRandomLetters, makeRandomNumber, pickRandom } from './utils'
 import { initSounds, sounds } from './assets/sounds'
 
@@ -166,6 +173,7 @@ export default {
       colorScheme: Math.random() > 0.75 ? 2 : 1,
       starChartType: Math.random() > 0.5 ? 'nav' : 'planet',
       chartOrPostType: 'chart',
+      pendingGates: 0,
     }
   },
   computed: {
@@ -183,19 +191,19 @@ export default {
     DividerContent,
     NumbersTable,
     StarChart,
-    CoreList
+    CoreList,
+    MissionLog
   },
   methods: {
     incrementNumberSequence() {
       this.numberSequence++
     },
     togglePostView(event){
-      console.log(event)
-      if (this.chartOrPostType === 'chart') {
-        this.chartOrPostType = 'post'
-      } else {
-        this.chartOrPostType = 'chart'
-      }
+      this.chartOrPostType = this.chartOrPostType === 'post' ? 'chart' : 'post'
+    },
+    showMissions() {
+      this.chartOrPostType = this.chartOrPostType === 'missions' ? 'chart' : 'missions'
+      sounds.panelBeep03?.play()
     },
     enterFullscreen() {
       if (document.fullscreenEnabled) {
@@ -522,6 +530,10 @@ body::-webkit-scrollbar-thumb {
   background-color: var(--lcars-color-a2);
 }
 
+.sidebar-bottom .nav-block { cursor: pointer; }
+.sidebar-bottom .nav-block:hover,
+.sidebar-bottom .nav-block.active { background-color: var(--lcars-color-a5); }
+
 .sidebar-top .sidebar-block:last-child {
   background-color: transparent;
   border: 0;
@@ -655,6 +667,12 @@ div.main-content > div.list-post {
 
 .main-content {
   grid-area: main-content;
+}
+
+/* Keep a view inside the remaining screen height so its own panels scroll */
+.main-content.fills-screen {
+  min-height: 0;
+  overflow: hidden;
 }
 
 .screen.SM .main-content {

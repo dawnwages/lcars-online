@@ -51,10 +51,23 @@ LCARS (Vue 3 + Vite)  ──►  Wagtail / Django API  ──►  Agent crew (Py
 | Frontend | Vue 3.5, Vite 8, axios | `LCARS/` |
 | Backend | Python 3.14, Django 6.1, Wagtail 8.0, Django REST Framework | `wagtail/LCARSAPP/` |
 | Agents | [PydanticAI](https://ai.pydantic.dev/) | planned |
-| Orchestration | [Prefect](https://www.prefect.io/), made durable with PydanticAI's `PrefectDurability` capability | planned |
+| Orchestration | [Prefect](https://www.prefect.io/): scheduled archive ingestion, and missions made durable with PydanticAI's `PrefectDurability` | built |
 | Evals | [DeepEval](https://deepeval.com/): graded against known answers and tool calls, not just prose | planned |
 
 Still undecided: which model provider to use, and which data store to use for the planet snapshot.
+
+## Fresh data on a schedule
+
+A Prefect flow (`archive-ingest`, in `wagtail/LCARSAPP/crew/ingest.py`) fetches the NASA Exoplanet Archive, validates it, saves a hashed snapshot, and records what changed since the previous one: new planets, removals, and revised measurements. Each fetch is a **Snapshot** in the Django admin. Missions analyze the newest snapshot, and Ops reports what changed.
+
+```bash
+cd wagtail/LCARSAPP
+uv run prefect server start                        # terminal 1: Prefect server and UI at http://127.0.0.1:4200
+uv run python manage.py serve_ingest               # terminal 2: runs the flow daily at 06:00 Eastern
+uv run python manage.py ingest_archive             # or fetch once, now
+```
+
+`serve_ingest` takes `--cron` and `--timezone`. Schedules only fire while both processes are running and the Mac is awake. You can also fetch from the LCARS bridge (Missions → New mission → **Fetch latest data**). Downloaded snapshots live in `crew/data/snapshots/` (gitignored). The October 7 baseline stays pinned in the repo.
 
 ## Installation
 

@@ -19,3 +19,8 @@ dist/
 site/
 media/
 .venv/
+*.sqlite3-wal
+*.sqlite3-shm
+.env.local
+wagtail/LCARSAPP/run/
+wagtail/LCARSAPP/crew/data/snapshots/

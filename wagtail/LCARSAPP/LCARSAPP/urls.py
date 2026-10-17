@@ -8,6 +8,7 @@ from wagtail.documents import urls as wagtaildocs_urls
 
 from search import views as search_views
 from .api import api_router
+from missions import api as missions_api
 
 urlpatterns = [
     path('django-admin/', admin.site.urls),
@@ -18,6 +19,15 @@ urlpatterns = [
     path('search/', search_views.search, name='search'),
 
     path('api/v2/', api_router.urls),
+    path('api/missions/session/', missions_api.session),
+    path('api/missions/', missions_api.mission_list),
+    path('api/missions/<int:pk>/', missions_api.mission_detail),
+    path('api/gates/<int:pk>/decide/', missions_api.decide_gate),
+    path('api/crew/status/', missions_api.crew_status),
+    path('api/crew/model/start/', missions_api.start_model),
+    path('api/crew/model/stop/', missions_api.stop_model),
+    path('api/crew/fetch/', missions_api.fetch_data),
+    path('api/missions/launch/', missions_api.launch_mission),
 
 ]
 
