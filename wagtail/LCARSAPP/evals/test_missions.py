@@ -16,9 +16,14 @@ LIMIT = int(os.environ.get("EVAL_MISSIONS", "5"))
 JUDGE = not os.environ.get("EVAL_SKIP_JUDGE")
 
 
+# Missions run without a real model: "test" (random output) and "local" (early test runs,
+# recorded before test-model missions were labeled)
+NOT_REAL_MODELS = ["test", "local", ""]
+
+
 def recent(kind):
     return list(Mission.objects.filter(kind=kind, status=Mission.Status.COMPLETE)
-                .exclude(model_name="test")[:LIMIT])
+                .exclude(model_name__in=NOT_REAL_MODELS)[:LIMIT])
 
 
 @pytest.mark.parametrize("mission", recent(Mission.Kind.ANALYSIS), ids=lambda m: f"mission-{m.pk}")

@@ -16,6 +16,14 @@ from missions.models import Gate, Mission, MissionEvent
 VALLEY_RANGE = (1.5, 2.1)  # Earth radii; published radius valley (Fulton et al. 2017)
 
 
+def _tool_args(payload):
+    """DeepEval wants a dict; some tools (apply_filters) take a list of filters."""
+    args = (payload or {}).get("args") if isinstance(payload, dict) else None
+    if args is None or isinstance(args, dict):
+        return args
+    return {"args": args}
+
+
 def mission_test_case(mission: Mission) -> LLMTestCase:
     events = list(mission.events.all())
     report = mission.report_page.specific if mission.report_page else None
@@ -28,8 +36,7 @@ def mission_test_case(mission: Mission) -> LLMTestCase:
         input=mission.question,
         actual_output=report_text or mission.verdict or "(no report)",
         context=[str(mission.result)],
-        tools_called=[ToolCall(name=e.title, input_parameters=(e.payload or {}).get("args")
-                               if isinstance(e.payload, dict) else None)
+        tools_called=[ToolCall(name=e.title, input_parameters=_tool_args(e.payload))
                       for e in events if e.kind == MissionEvent.Kind.TOOL_CALL],
         metadata={"mission_id": mission.pk},
     )
@@ -120,7 +127,9 @@ class ReportNumbersFaithful(_MissionMetric):
         return "Report numbers come from results"
 
     def measure(self, test_case, *args, **kwargs):
-        numbers = set(re.findall(r"\d+\.\d+", test_case.actual_output))
+        # The heading's stardate is the mission's date, not a result
+        text = test_case.actual_output.replace(self.mission(test_case).stardate, "")
+        numbers = set(re.findall(r"\d+\.\d+", text))
         source = str(test_case.context)
         missing = sorted(n for n in numbers if n not in source)
         return self._done(not missing and bool(numbers),
