@@ -101,9 +101,14 @@ def _caffeinate():
     return shutil.which("caffeinate") or "caffeinate"
 
 
+# Commands that run the crew against the model and log as missions
+CREW_COMMANDS = ("run_mission", "bakeoff", "red_team")
+
+
 def mission_processes_running():
-    """True if any mission process is alive, whether started here or in a terminal."""
-    out = subprocess.run(["pgrep", "-f", "manage.py run_mission"], capture_output=True, text=True)
+    """True if any crew process is alive (mission, bake-off or red team), from here or a terminal."""
+    pattern = "manage.py (" + "|".join(CREW_COMMANDS) + ")"
+    out = subprocess.run(["pgrep", "-f", pattern], capture_output=True, text=True)
     return bool(out.stdout.strip())
 
 
