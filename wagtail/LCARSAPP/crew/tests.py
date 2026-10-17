@@ -130,3 +130,11 @@ class FilterValidationTests(SimpleTestCase):
             science.apply_filters(self.df, [{"column": "disc_method", "op": "lt", "value": "tran"}])
         with self.assertRaisesRegex(science.InvalidFilter, "not a number"):
             science.apply_filters(self.df, [{"column": "pl_rade", "op": "lt", "value": "big"}])
+
+    def test_text_value_that_never_occurs_is_refused(self):
+        # Regression: Tactical filtered disc_method = 'transit' (the code is 'tran'),
+        # got 0 planets, and spent its whole budget guessing names
+        with self.assertRaisesRegex(science.InvalidFilter, "has no value 'transit'.*'tran'"):
+            science.apply_filters(self.df, [{"column": "disc_method", "op": "eq", "value": "transit"}])
+        subset, _ = science.apply_filters(self.df, [{"column": "disc_method", "op": "eq", "value": "tran"}])
+        self.assertGreater(len(subset), 4000)

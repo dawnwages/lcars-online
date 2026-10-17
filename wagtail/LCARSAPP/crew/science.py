@@ -93,6 +93,12 @@ def _filter_value(df, column, op, value):
             raise InvalidFilter(f"{column} is numeric, but the value {value!r} is not a number.")
     if op not in ("eq", "ne"):
         raise InvalidFilter(f"{column} is text; use 'eq' or 'ne', not '{op}'.")
+    # A value that never occurs would silently match nothing (e.g. 'transit' for 'tran')
+    present = df[column].dropna().astype(str)
+    if not (present == str(value)).any():
+        common = present.value_counts().head(8).index.tolist()
+        raise InvalidFilter(f"{column} has no value {str(value)!r}. Values include: "
+                            + ", ".join(repr(v) for v in common) + ".")
     return str(value)
 
 

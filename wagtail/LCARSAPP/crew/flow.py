@@ -164,7 +164,8 @@ def away_mission(mission_id: int, gate_policies: dict | None = None):
 
             # Tactical: try to break it
             review = run_station(crew["tactical"], S.TACTICAL, (
-                f"Question: {mission.question}\nPlan:\n{plan.model_dump_json()}\n"
+                f"Question: {mission.question}\n{planning_facts(card)}\n"
+                f"Plan:\n{plan.model_dump_json()}\n"
                 f"Results:\n{json.dumps(results, default=str)}"), deps)
             for issue in review.issues:
                 rec.log(S.TACTICAL, K.DECISION, f"{issue.severity} {issue.category}",
