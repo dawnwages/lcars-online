@@ -30,7 +30,7 @@ REQUEST_TIMEOUT = float(os.environ.get("CREW_REQUEST_TIMEOUT", "240"))
 # Per-station budget for one run: model requests (incl. retries) and tool calls
 STATION_LIMITS = {
     "ops": UsageLimits(request_limit=4),
-    "science": UsageLimits(request_limit=12, tool_calls_limit=6),
+    "science": UsageLimits(request_limit=16, tool_calls_limit=10),
     "tactical": UsageLimits(request_limit=6, tool_calls_limit=3),
     "log": UsageLimits(request_limit=4),
 }
@@ -62,6 +62,16 @@ def number_hazards(brief):
     """Give Ops' hazards stable IDs (H1, H2, ...) for the plan to answer."""
     return [{"id": f"H{i}", "name": h.name, "evidence": h.evidence, "implication": h.implication}
             for i, h in enumerate(brief.hazards, start=1)]
+
+
+def planning_facts(card):
+    """The data card facts a planner needs, so it doesn't spend tool calls rediscovering them."""
+    keys = ["n_planets", "discovery_methods", "missing_pct", "mass_provenance",
+            "median_orbital_period_days_by_method", "radius_relative_error_quantiles",
+            "changes_since_previous_snapshot"]
+    lines = [f"- {k}: {card[k]}" for k in keys if k in card]
+    return ("Data facts (from Ops' data card; rade_rel_err = radius error / radius):\n"
+            + "\n".join(lines))
 
 
 def hazard_checklist(hazards):
@@ -122,8 +132,13 @@ def count_population(ctx: RunContext[CrewDeps], filters: list[PopulationFilter])
     """Count how many planets remain after applying filters in order, step by step."""
     args = [f.model_dump(exclude={"reason"}) for f in filters]
     with ctx.deps.recorder.tool(ctx.deps.recorder.current_station, "count_population", args) as box:
-        _, steps = science.apply_filters(ctx.deps.df, args)
-        box["result"] = {"steps": steps, "final_n": steps[-1]["after"] if steps else len(ctx.deps.df)}
+        try:
+            _, steps = science.apply_filters(ctx.deps.df, args)
+            box["result"] = {"steps": steps,
+                             "final_n": steps[-1]["after"] if steps else len(ctx.deps.df)}
+        except science.InvalidFilter as exc:
+            # Tell the model what's wrong, so it can fix the filter
+            box["result"] = {"error": str(exc)}
     return box["result"]
 
 
@@ -180,9 +195,14 @@ evidence supports. Write in the first person plural ("we")."""
 def check_plan_hazards(ctx: RunContext[CrewDeps], plan: AnalysisPlan) -> AnalysisPlan:
     """Enforced in code: a plan that leaves a hazard unanswered goes back to the model."""
     problems = hazard_problems(plan, ctx.deps.hazards)
+    if ctx.deps.df is not None and len(ctx.deps.df):
+        try:
+            science.apply_filters(ctx.deps.df, [f.model_dump(exclude={"reason"}) for f in plan.population])
+        except science.InvalidFilter as exc:
+            problems.insert(0, f"Population filter problem: {exc}")
     if problems:
         ctx.deps.recorder.log(MissionEvent.Station.SCIENCE, MissionEvent.Kind.NOTE,
-                              "Plan returned: hazards not answered",
+                              "Plan returned: hazards not answered or filters invalid",
                               rationale="\n".join(problems), payload=plan.model_dump())
         raise ModelRetry("Revise the plan. " + " ".join(problems))
     return plan

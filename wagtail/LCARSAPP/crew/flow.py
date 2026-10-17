@@ -15,7 +15,8 @@ from pydantic_ai.durable_exec.prefect import PrefectDurability
 from pydantic_ai.exceptions import AgentRunError
 
 from crew import science
-from crew.agents import MODEL_NAME, CrewDeps, build_crew, hazard_checklist, number_hazards, run_station
+from crew.agents import (MODEL_NAME, CrewDeps, build_crew, hazard_checklist, number_hazards,
+                         planning_facts, run_station)
 from missions.models import Gate, Mission, MissionEvent, Snapshot
 from missions.recorder import GateRejected, MissionRecorder
 
@@ -134,7 +135,8 @@ def away_mission(mission_id: int, gate_policies: dict | None = None):
             # Science Officer: pre-register the plan
             plan = run_station(crew["science"], S.SCIENCE, (
                 f"Question: {mission.question}\n\nOps brief:\n{brief.summary}\n\n"
-                f"{hazard_checklist(deps.hazards)}\n\nColumns: {card['columns']}\n{feedback}"), deps)
+                f"{planning_facts(card)}\n\n{hazard_checklist(deps.hazards)}\n\n"
+                f"Columns: {card['columns']}\n{feedback}"), deps)
             rec.log(S.SCIENCE, K.DECISION, f"Analysis plan (attempt {attempt + 1})",
                     rationale=plan.hypothesis,
                     alternatives=[a.model_dump() for a in plan.alternatives_considered],
@@ -148,9 +150,10 @@ def away_mission(mission_id: int, gate_policies: dict | None = None):
             # Engineering: run it exactly, or refuse if the sample can't support the test
             try:
                 engineering(rec, df, plan, mission.seed, negative_control)
-            except science.InsufficientSample as exc:
-                rec.log(S.ENGINEERING, K.DECISION, "Plan refused: sample too small",
-                        rationale=str(exc))
+            except (science.InsufficientSample, science.InvalidFilter) as exc:
+                rec.log(S.ENGINEERING, K.DECISION, "Plan refused: " + (
+                    "sample too small" if isinstance(exc, science.InsufficientSample)
+                    else "invalid filter"), rationale=str(exc))
                 if attempt == MAX_REVISIONS:
                     raise
                 feedback = (f"Engineering refused the previous plan: {exc}. "
@@ -186,7 +189,7 @@ def away_mission(mission_id: int, gate_policies: dict | None = None):
         page.get_latest_revision().publish()
         rec.log(S.CAPTAIN, K.NOTE, "Captain's Log published", payload={"page_id": page.pk})
         rec.set_status(Mission.Status.COMPLETE, finished_at=timezone.now())
-    except science.InsufficientSample as exc:
+    except (science.InsufficientSample, science.InvalidFilter) as exc:
         rec.set_status(Mission.Status.FAILED, finished_at=timezone.now(),
                        verdict=f"No valid plan: {exc}")
     except AgentRunError as exc:

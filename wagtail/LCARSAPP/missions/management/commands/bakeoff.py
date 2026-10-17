@@ -93,12 +93,13 @@ class Command(BaseCommand):
                 plan = None
             else:
                 deps.hazards = agents.number_hazards(brief) if brief else []
-                returns_before = mission.events.filter(title="Plan returned: hazards not answered").count()
+                returns_before = mission.events.filter(title="Plan returned: hazards not answered or filters invalid").count()
                 plan, t, meta = timed(crew["science"], "science", (
                     f"Question: {QUESTION}\nOps brief:\n{brief.summary if brief else ''}\n\n"
-                    f"{agents.hazard_checklist(deps.hazards)}\n\nColumns: {card['columns']}"))
+                    f"{agents.planning_facts(card)}\n\n{agents.hazard_checklist(deps.hazards)}\n\n"
+                    f"Columns: {card['columns']}"))
                 meta["hazard_returns"] = mission.events.filter(
-                    title="Plan returned: hazards not answered").count() - returns_before
+                    title="Plan returned: hazards not answered or filters invalid").count() - returns_before
             checks = {}
             if plan:
                 filters = [f.model_dump(exclude={"reason"}) for f in plan.population]

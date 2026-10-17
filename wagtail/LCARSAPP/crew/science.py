@@ -72,15 +72,43 @@ def data_card(df):
     }
 
 
+class InvalidFilter(ValueError):
+    pass
+
+
+def _filter_value(df, column, op, value):
+    """Check and normalize a filter's value; never silently match nothing."""
+    if op == "notna":
+        return None
+    if value is None or (isinstance(value, str) and not value.strip()):
+        if pd.api.types.is_numeric_dtype(df[column]):
+            example = round(float(df[column].median()), 2)
+        else:
+            example = repr(df[column].mode().iloc[0])
+        raise InvalidFilter(f"Filter '{column} {op}' needs a value (e.g. {column} {op} {example}).")
+    if pd.api.types.is_numeric_dtype(df[column]):
+        try:
+            return float(value)
+        except (TypeError, ValueError):
+            raise InvalidFilter(f"{column} is numeric, but the value {value!r} is not a number.")
+    if op not in ("eq", "ne"):
+        raise InvalidFilter(f"{column} is text; use 'eq' or 'ne', not '{op}'.")
+    return str(value)
+
+
 def apply_filters(df, filters):
-    """Apply filters given as dicts: {"column", "op", "value"}. Returns (subset, steps)."""
+    """Apply filters given as dicts: {"column", "op", "value"}. Returns (subset, steps).
+
+    Raises InvalidFilter for anything malformed, rather than silently matching no planets.
+    """
     steps = []
     for f in filters:
-        column, op, value = f["column"], f["op"], f.get("value")
+        column, op = f["column"], f["op"]
         if column not in df.columns:
-            raise ValueError(f"Unknown column: {column}")
+            raise InvalidFilter(f"Unknown column: {column}")
         if op not in FILTER_OPS:
-            raise ValueError(f"Unknown filter op: {op}")
+            raise InvalidFilter(f"Unknown filter op: {op}")
+        value = _filter_value(df, column, op, f.get("value"))
         before = len(df)
         df = df[FILTER_OPS[op](df[column], value)]
         steps.append({"column": column, "op": op, "value": value,

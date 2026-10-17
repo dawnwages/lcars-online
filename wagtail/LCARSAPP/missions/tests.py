@@ -231,7 +231,7 @@ class HazardRetryTests(TransactionTestCase):
             plan = crew["science"].run_sync("Plan it", deps=deps).output
         self.assertEqual(len(calls), 2)
         self.assertEqual({r.hazard_id for r in plan.hazard_responses}, {"H1", "H2"})
-        returned = mission.events.get(title="Plan returned: hazards not answered")
+        returned = mission.events.get(title="Plan returned: hazards not answered or filters invalid")
         self.assertIn("H2", returned.rationale)
 
 
@@ -256,5 +256,7 @@ class StationLimitTests(TransactionTestCase):
         error = mission.events.get(kind="error")
         self.assertIn("science_officer failed", error.title)
         calls = error.payload["tool_calls"]
-        self.assertLessEqual(calls.count("column_summary"), 7)
+        # Stopped at the budget: at most the limit, plus the one call that was refused
+        limit = agents.STATION_LIMITS["science"].tool_calls_limit
+        self.assertLessEqual(calls.count("column_summary"), limit + 1)
         self.assertGreater(error.payload["model_requests"], 1)

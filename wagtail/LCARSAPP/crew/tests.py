@@ -105,3 +105,28 @@ class IngestTests(SimpleTestCase):
         self.assertEqual((changes["added"], changes["removed"], changes["revised"]), (1, 1, 1))
         self.assertEqual(changes["revised_examples"][0]["fields"]["pl_rade"][1], 7.1)
         self.assertEqual(changes["added_by_method"], {"tran": 1})
+
+
+class FilterValidationTests(SimpleTestCase):
+    """Regression: a comparison with no value silently matched 0 planets, sending the
+    Qwen Science Officer into a 34-minute debugging loop."""
+
+    @classmethod
+    def setUpClass(cls):
+        super().setUpClass()
+        cls.df, _ = science.load_snapshot()
+
+    def test_comparison_without_value_is_refused(self):
+        with self.assertRaisesRegex(science.InvalidFilter, "needs a value"):
+            science.apply_filters(self.df, [{"column": "pl_rade", "op": "gt", "value": None}])
+
+    def test_numeric_text_is_converted(self):
+        subset, steps = science.apply_filters(self.df, [{"column": "pl_rade", "op": "gt", "value": "1.0"}])
+        self.assertGreater(len(subset), 4000)
+        self.assertEqual(steps[0]["value"], 1.0)
+
+    def test_order_ops_on_text_columns_are_refused(self):
+        with self.assertRaisesRegex(science.InvalidFilter, "is text"):
+            science.apply_filters(self.df, [{"column": "disc_method", "op": "lt", "value": "tran"}])
+        with self.assertRaisesRegex(science.InvalidFilter, "not a number"):
+            science.apply_filters(self.df, [{"column": "pl_rade", "op": "lt", "value": "big"}])
