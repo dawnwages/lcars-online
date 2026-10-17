@@ -13,6 +13,7 @@ import urllib.request
 from pathlib import Path
 
 from crew.agents import MODEL_KEY
+from crew.models import MODEL_PROFILES
 
 PROJECT_DIR = Path(__file__).resolve().parents[1]          # wagtail/LCARSAPP
 REPO_DIR = PROJECT_DIR.parents[1]
@@ -49,7 +50,8 @@ def _read_pid(name):
 def list_models():
     models = [{"name": TEST_MODEL, "label": "Test model (no LLM, random output)", "size_gb": 0}]
     for path in sorted(MODELS_DIR.glob("*.gguf")):
-        models.append({"name": path.stem, "label": path.stem,
+        profile = MODEL_PROFILES.get(path.stem, {})
+        models.append({"name": path.stem, "label": profile.get("label", path.stem),
                        "size_gb": round(path.stat().st_size / 1e9, 1)})
     return models
 
@@ -90,8 +92,9 @@ def start_model(name):
     RUN_DIR.mkdir(exist_ok=True)
     with open(RUN_DIR / "model-server.log", "ab") as log:
         proc = subprocess.Popen(
-            [_caffeinate(), "-is", str(REPO_DIR / "scripts" / "model-server.sh"), str(path)]
-            if shutil.which("caffeinate") else [str(REPO_DIR / "scripts" / "model-server.sh"), str(path)],
+            ([_caffeinate(), "-is"] if shutil.which("caffeinate") else [])
+            + [str(REPO_DIR / "scripts" / "model-server.sh"), str(path),
+               str(MODEL_PROFILES.get(name, {}).get("reasoning_budget", 0))],
             stdout=log, stderr=subprocess.STDOUT, start_new_session=True,
             env={**os.environ, "PATH": SERVER_PATH, "CREW_MODEL_KEY": MODEL_KEY})
     _pid_file("model-server").write_text(str(proc.pid))

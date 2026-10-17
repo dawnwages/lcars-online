@@ -104,12 +104,13 @@ Rules enforced in code, not prompts:
 
 ## Models
 
-Any `.gguf` file in `~/models` (or `$CREW_MODELS_DIR`) appears in the bridge's model picker. Choosing one starts its server and stops any other, so only one model is in memory.
+Any `.gguf` file in `~/models` (or `$CREW_MODELS_DIR`) appears in the bridge's model picker; known models get a readable label and per-model settings in `wagtail/LCARSAPP/crew/models.py`. Choosing one starts its server and stops any other, so only one model is in memory.
 
 | Model | Download | Size | Notes |
 |---|---|---|---|
 | Qwen3.5-9B (Q4_K_M) | `scripts/download-models.sh qwen` | 5.7 GB | Tested end to end; about 10 tokens/s on an M1 |
 | Gemma 4 12B (Q4_K_M) | `scripts/download-models.sh gemma` | 7.1 GB | Loads and calls tools; about 8 tokens/s on an M1 |
+| DeepSeek R1-0528 (Qwen3 8B distill, Q4_K_M) | `scripts/download-models.sh deepseek` | 5.0 GB | DeepSeek's newest model that fits a laptop (V4 Flash is 290B+ parameters). A reasoning model: about 12 tokens/s, but it thinks out loud, so it gets a 4,096-token response budget. Experimental in the crew. |
 | Test model | built in | none | Random schema-valid output; for rehearsing the flow and gates, not analysis |
 
 ## Services and ports

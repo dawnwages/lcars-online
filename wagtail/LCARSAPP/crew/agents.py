@@ -13,6 +13,7 @@ from pydantic_ai.models.openai import OpenAIChatModel
 from pydantic_ai.providers.openai import OpenAIProvider
 
 from crew import science
+from crew.models import MODEL_PROFILES
 from crew.schemas import AnalysisPlan, CaptainsLog, OpsBrief, PopulationFilter, Review
 from missions.models import MissionEvent
 from missions.recorder import MissionRecorder
@@ -24,7 +25,8 @@ MODEL_KEY = os.environ.get("CREW_MODEL_KEY", "lcars-local")
 OUTPUT_MODE = os.environ.get("CREW_OUTPUT_MODE", "tool")  # tool | native | prompted (llama.cpp can't combine native with tools)
 TEMPERATURE = float(os.environ.get("CREW_TEMPERATURE", "0.2"))
 # Small local models can loop on long structured output; fail fast instead of for minutes
-MAX_TOKENS = int(os.environ.get("CREW_MAX_TOKENS", "1500"))
+MAX_TOKENS = int(os.environ.get("CREW_MAX_TOKENS")
+                 or MODEL_PROFILES.get(MODEL_NAME, {}).get("max_tokens", 1500))
 REQUEST_TIMEOUT = float(os.environ.get("CREW_REQUEST_TIMEOUT", "240"))
 
 # Per-station budget for one run: model requests (incl. retries) and tool calls
