@@ -162,7 +162,9 @@ def away_mission(mission_id: int, gate_policies: dict | None = None):
             results = _result_json(rec)
             rec.set_status(Mission.Status.RUNNING, result=results)
 
-            # Tactical: try to break it
+            # Tactical: try to break it, citing only numbers it was given or counted
+            deps.evidence = [json.dumps(results, default=str), json.dumps(card, default=str),
+                             plan.model_dump_json()]
             review = run_station(crew["tactical"], S.TACTICAL, (
                 f"Question: {mission.question}\n{planning_facts(card)}\n"
                 f"Plan:\n{plan.model_dump_json()}\n"

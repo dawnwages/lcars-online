@@ -138,3 +138,22 @@ class FilterValidationTests(SimpleTestCase):
             science.apply_filters(self.df, [{"column": "disc_method", "op": "eq", "value": "transit"}])
         subset, _ = science.apply_filters(self.df, [{"column": "disc_method", "op": "eq", "value": "tran"}])
         self.assertGreater(len(subset), 4000)
+
+
+class ReviewNumberTests(SimpleTestCase):
+    """Regression: mission 7's Tactical cited p=0.07 and '97%', numbers nothing computed."""
+
+    EVIDENCE = ["{'n': 3639, 'silverman': {'p_value': 0.018}, 'valley': {'radius_earth': 1.719}}",
+                "{'final_n': 113}", "{'n_planets': 6451}"]
+
+    def test_invented_numbers_are_caught(self):
+        from crew.agents import unsupported_numbers
+        claim = ("97% transit-dominated (4785/6451). Non-significant (p=0.07) for n=113. "
+                 "Full sample n=3639, p=0.018, valley at 1.72.")
+        self.assertEqual(unsupported_numbers(claim, self.EVIDENCE), ["0.07", "4785", "97%"])
+
+    def test_cited_numbers_and_small_counts_pass(self):
+        from crew.agents import unsupported_numbers
+        self.assertEqual(unsupported_numbers(
+            "n=3639 with p=0.018; valley 1.72; 113 long-period planets; 2 issues; 1.8% of n", 
+            self.EVIDENCE + ["0.018"]), [])

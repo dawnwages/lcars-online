@@ -191,7 +191,8 @@ class HazardCheckTests(TestCase):
              {"hazard_id": "H2", "response": "accept_risk", "explanation": "n/a"},
              {"hazard_id": "H9", "response": "accept_risk", "explanation": "made-up hazard " * 4}])
         problems = " ".join(hazard_problems(plan, self.HAZARDS))
-        self.assertIn("filter_number 5", problems)
+        self.assertIn("filter_number is 5", problems)
+        self.assertIn("1 = disc_method eq tran", problems)
         self.assertIn("without a real explanation", problems)
         self.assertIn("H9 is not on the checklist", problems)
 

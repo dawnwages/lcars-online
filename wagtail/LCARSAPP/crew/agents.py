@@ -1,5 +1,6 @@
 """The crew: one narrow PydanticAI agent per station, each with its own tools."""
 import os
+import re
 from dataclasses import dataclass, field
 
 import pandas as pd
@@ -59,6 +60,8 @@ class CrewDeps:
     df: pd.DataFrame
     # Ops' hazards with IDs ({"id", "name", "implication"}); every plan must answer each one
     hazards: list = field(default_factory=list)
+    # Text whose numbers a review may cite: results, the data card, and counts it ran
+    evidence: list = field(default_factory=list)
 
 
 def number_hazards(brief):
@@ -104,8 +107,11 @@ def hazard_problems(plan, hazards):
         if r.response == "filter":
             n = r.filter_number
             if n is None or not 1 <= n <= len(plan.population):
-                problems.append(f"{r.hazard_id} ({name}) says 'filter' but filter_number {n} is not "
-                                f"one of your {len(plan.population)} population filters.")
+                choices = "; ".join(f"{i} = {f.column} {f.op} {'' if f.value is None else f.value}".strip()
+                                    for i, f in enumerate(plan.population, start=1))
+                problems.append(f"{r.hazard_id} ({name}) says 'filter' but filter_number is {n}. Set "
+                                f"filter_number to the position of the filter that handles it ({choices}), "
+                                "or use response 'accept_risk' with an explanation.")
             elif plan.population[n - 1].column == ANALYSIS_COLUMN:
                 problems.append(
                     f"{r.hazard_id} ({name}) points to a filter on {ANALYSIS_COLUMN}, the variable "
@@ -122,9 +128,9 @@ def hazard_problems(plan, hazards):
     return problems
 
 
-def _agent(name, output_type, instructions, tools=(), capabilities=()):
+def _agent(name, output_type, instructions, tools=(), capabilities=(), retries=3):
     return Agent(
-        make_model(), name=name, deps_type=CrewDeps, retries=3,
+        make_model(), name=name, deps_type=CrewDeps, retries=retries,
         output_type=OUTPUT_WRAPPERS[OUTPUT_MODE](output_type),
         instructions=instructions, tools=list(tools), capabilities=list(capabilities))
 
@@ -139,6 +145,7 @@ def count_population(ctx: RunContext[CrewDeps], filters: list[PopulationFilter])
             _, steps = science.apply_filters(ctx.deps.df, args)
             box["result"] = {"steps": steps,
                              "final_n": steps[-1]["after"] if steps else len(ctx.deps.df)}
+            ctx.deps.evidence.append(str(box["result"]))
         except science.InvalidFilter as exc:
             # Tell the model what's wrong, so it can fix the filter
             box["result"] = {"error": str(exc)}
@@ -195,6 +202,58 @@ chosen, what the reviewer raised, and the limitations. No hype; never claim more
 evidence supports. Write in the first person plural ("we")."""
 
 
+_NUMBER = re.compile(r"(?<![\w.])-?\d+(?:\.\d+)?%?")
+
+
+def _values(text):
+    out = set()
+    for token in _NUMBER.findall(text):
+        try:
+            out.add(float(token.rstrip("%")))
+        except ValueError:
+            pass
+    return out
+
+
+def unsupported_numbers(text, evidence):
+    """Numbers in `text` (decimals, and integers of 10 or more) that appear nowhere in evidence.
+
+    Matches at the precision the claim is written with, so '0.018' matches 0.0180 and
+    '1.72' matches 1.719. Percentages must appear as written or as a fraction.
+    """
+    known = _values(" ".join(evidence))
+    missing = []
+    for token in _NUMBER.findall(text):
+        is_pct = token.endswith("%")
+        raw = token.rstrip("%")
+        value = float(raw)
+        if "." not in raw and abs(value) < 10 and not is_pct:
+            continue  # small counts and list positions
+        places = len(raw.split(".")[1]) if "." in raw else 0
+        candidates = {value, value / 100} if is_pct else {value}
+        if not any(round(k, places) == round(c, places) or abs(k - c) <= 10 ** -places / 2
+                   for k in known for c in candidates):
+            missing.append(token)
+    return sorted(set(missing))
+
+
+def check_review_numbers(ctx: RunContext[CrewDeps], review: Review) -> Review:
+    """Enforced in code: a review may only cite numbers it was given or counted itself."""
+    text = " ".join([review.summary] + [i.detail for i in review.issues])
+    missing = unsupported_numbers(text, ctx.deps.evidence)
+    if missing:
+        ctx.deps.recorder.log(MissionEvent.Station.TACTICAL, MissionEvent.Kind.NOTE,
+                              "Review returned: numbers not found in results",
+                              rationale="Not in results, data card or counts: " + ", ".join(missing),
+                              payload=review.model_dump())
+        raise ModelRetry(
+            "Your review cites numbers that appear nowhere in the results, the data card, or your "
+            f"own count_population calls: {', '.join(missing)}. You cannot compute p-values or "
+            "percentages yourself. Cite only numbers you were given or counted, or describe the "
+            "concern without a number.")
+    return review
+
+
 def check_plan_hazards(ctx: RunContext[CrewDeps], plan: AnalysisPlan) -> AnalysisPlan:
     """Enforced in code: a plan that leaves a hazard unanswered goes back to the model."""
     problems = hazard_problems(plan, ctx.deps.hazards)
@@ -213,13 +272,16 @@ def check_plan_hazards(ctx: RunContext[CrewDeps], plan: AnalysisPlan) -> Analysi
 
 def build_crew(capabilities=()):
     science_officer = _agent("science_officer", AnalysisPlan, SCIENCE,
-                             tools=[count_population, column_summary], capabilities=capabilities)
+                             tools=[count_population, column_summary], capabilities=capabilities,
+                             retries=5)
     science_officer.output_validator(check_plan_hazards)
+    tactical = _agent("tactical", Review, TACTICAL, tools=[count_population],
+                      capabilities=capabilities, retries=4)
+    tactical.output_validator(check_review_numbers)
     return {
         "ops": _agent("ops", OpsBrief, OPS, capabilities=capabilities),
         "science": science_officer,
-        "tactical": _agent("tactical", Review, TACTICAL, tools=[count_population],
-                           capabilities=capabilities),
+        "tactical": tactical,
         "log": _agent("captains_log", CaptainsLog, LOG, capabilities=capabilities),
     }
 
