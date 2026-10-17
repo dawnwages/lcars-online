@@ -4,106 +4,167 @@
 
 **What if your data science dashboard looked like the bridge of the Enterprise, and actually worked like it too?**
 
-LCARS Online is a Star Trek LCARS interface on top of a crew of AI agents. The agents explore real data: every confirmed exoplanet in NASA's Exoplanet Archive. Each agent has one job and a short list of tools: bringing in the data, finding anomalies, answering questions in plain English, and writing reports.
+LCARS Online is a Star Trek LCARS interface on top of a crew of AI agents that analyze real NASA data. The agents plan and review; deterministic Python computes every number; a person approves each decision. Everything runs locally on a laptop, including the language model.
 
-This is the companion repo for **[To Boldly Go: Data Science Exploration with AI Agents (ft Star Trek's LCARS theme)](https://2026.allthingsopen.org/sessions/to-boldly-go-data-science-exploration-with-ai-agents-ft-star-treks-lcars-theme)** at All Things Open 2026, Tuesday, October 20, 10:30 to 11:00 a.m. ET, Raleigh, NC.
+This is the companion repo for **[To Boldly Go: Data Science Exploration with AI Agents (ft Star Trek's LCARS theme)](https://2026.allthingsopen.org/sessions/to-boldly-go-data-science-exploration-with-ai-agents-ft-star-treks-lcars-theme)** at All Things Open 2026, Raleigh, NC.
 
-> **Status:** in development for the talk. The LCARS frontend and the Wagtail backend run today. The agent crew below is the plan and is being built. See [docs/talk-plan.md](docs/talk-plan.md).
+## Quick start (from zero)
+
+Tested on an Apple Silicon Mac with 16 GB of memory. Linux should work; see [Other platforms](#other-platforms).
+
+**1. Install the prerequisites** (once per machine):
+
+```bash
+xcode-select --install          # git (skip if you have it)
+brew install uv node llama.cpp  # uv (Python), Node.js 22+, llama.cpp (local model server)
+```
+
+No Homebrew? Install uv with `curl -LsSf https://astral.sh/uv/install.sh | sh`, Node.js from [nodejs.org](https://nodejs.org), and llama.cpp from [its releases](https://github.com/ggml-org/llama.cpp/releases).
+
+**2. Get the code and set it up:**
+
+```bash
+git clone https://github.com/dawnwages/lcars-online.git
+cd lcars-online
+scripts/setup.sh
+```
+
+`setup.sh` installs Python 3.14 and every package, creates `wagtail/LCARSAPP/.env.local` with a generated admin password and model-server key, sets up the database and admin user, fetches today's NASA data, and installs the frontend. It takes about a minute and is safe to run again.
+
+**3. Download a model** (once; 5.7 GB):
+
+```bash
+scripts/download-models.sh qwen
+```
+
+**4. Start everything:**
+
+```bash
+scripts/start.sh
+```
+
+**5. Use it:**
+
+1. Log in at **http://localhost:8000/admin** as `captain`. The password is in `wagtail/LCARSAPP/.env.local`.
+2. Open the bridge at **http://localhost:8080**, click **Missions**, open **New mission**, choose a model, and click **Engage**.
+3. Approve each gate with **Make it so** as the mission runs. A mission with a real model takes about 15–20 minutes on an M1.
+
+Stop everything with `scripts/stop.sh`.
 
 ## The mission: seek out new worlds
 
-The data is NASA's [Exoplanet Archive](https://exoplanetarchive.ipac.caltech.edu/): 6,375 confirmed planets (as of October 2026), discovered from 1992 to today. Each planet has its orbit, size, mass, temperature, distance, and discovery method. The archive has a free public API with no key required, and the demo also ships with a saved snapshot so it runs without conference Wi-Fi.
+The data is NASA's [Exoplanet Archive](https://exoplanetarchive.ipac.caltech.edu/) (`pscomppars` table): about 6,400 confirmed planets with their orbit, size, mass, temperature, distance, and discovery method. A Prefect flow fetches it daily; the archive itself updates weekly, usually on Thursdays. A pinned snapshot from 2026-10-07 is kept in the repo, so everything also works offline.
+
+The question the crew investigates: **is there a gap in the sizes of small planets?** This is the *radius valley* (Fulton et al. 2017), a known result: planets around 1.5–2.0 Earth radii are rare. Because the answer is known, it's a fair test of whether the crew does the analysis well.
 
 ## The crew
 
-Agentic AI in data science means a coordinated team of specialized agents, not one chatbot. Each crew member does one narrow job, can use only the tools on its own list, and logs everything it does.
+Each station does one narrow job with an allow-listed set of tools. Models never compute numbers.
 
-| Station | Agent | Job | Tools it may use |
-|---|---|---|---|
-| Operations | **Ops** | Data ingestion: fetch the archive, validate the schema, store a snapshot | Archive API (read), snapshot writer |
-| Science | **Science Officer** | Anomaly detection: find planets that don't fit the pattern, and explain why | Outlier scan over planet properties |
-| Computer | **Computer** | Natural-language questions: "Computer, how many planets were found by transit since 2020?" | Read-only SQL with a row limit |
-| Captain's Log | **Log** | Report generation: summarize a mission as a Captain's Log entry | Create a **draft** Wagtail page |
-| Bridge | **Bridge** | Routes each request to the right crew member | Hand-offs to the crew |
+| Station | Who | Job |
+|---|---|---|
+| **Ops** | Agent | Audits the data card (method counts, missing values, inferred masses, precision, what changed since the last fetch) and lists the hazards, numbered H1, H2, … |
+| **Science Officer** | Agent | Writes the analysis plan **before** any results exist: the population, bandwidth, significance level, what would falsify it, and a response to every hazard. Tools: `count_population`, `column_summary`. |
+| **Engineering** | Code, no model | Runs the approved plan exactly: kernel density of planet radii, Silverman's multimodality test, bootstrap interval for the valley, a specification curve across precision cuts, and a negative control. Refuses plans with invalid filters or fewer than 200 planets. |
+| **Tactical** | Agent | Adversarial review: selection bias, circularity, p-hacking, power, robustness. Can accept, send back for one revision, or reject. |
+| **Captain's Log** | Agent | Writes the report as a **draft** Wagtail page. |
+| **Captain** | You | Approves the data card, the plan (and any revision), and publishing. |
 
-Rules this crew follows, all enforced in code, not just in prompts:
+Rules enforced in code, not prompts:
 
-- **Read-only data access.** The Computer can't modify the database. Queries are checked as `SELECT`-only and capped in size.
-- **A human publishes.** The Log agent can only create drafts. A person reviews and publishes each report in the Wagtail admin.
-- **Every run is recorded.** Every agent run, tool call, and approval is logged.
-- **Memory is the Captain's Log.** Published reports become context for later missions.
+- **Every hazard gets an answer.** A plan that leaves one unanswered, or points to an invalid filter, is sent back to the model with a specific correction (and the return is logged).
+- **Plans are pre-registered.** You approve the plan before Engineering computes anything.
+- **Numbers come from code.** The report's numbers are checked against Engineering's results by the evals.
+- **Bounded work.** Each station has a budget (requests, tool calls, 1,500-token responses, 4-minute requests), so a confused model fails fast with its output logged.
+- **Everything is logged.** Every tool call, model output, decision, and approval is an append-only event in the mission log.
 
 ## Architecture
 
 ```
-LCARS (Vue 3 + Vite)  ──►  Wagtail / Django API  ──►  Agent crew (PydanticAI)
-        ▲                        │                          │
-        │                        ▼                          ▼
-   Captain's Log pages  ◄──  Wagtail admin (human     Exoplanet snapshot
-   (published reports)       review + publish)        (read-only)
-                                                            ▲
-                                Prefect: scheduled "away missions"
-                                (ingest → scan → log), retries, run history
+ LCARS bridge (Vue 3 + Vite, :8080) ──► Django / Wagtail API (:8000) ──► mission process
+        ▲   launch, gates, live log          │  admin: missions, gates,        │  Prefect flow
+        │                                    │  snapshots, reports            ▼
+        └──── Captain's Log pages ◄──────────┘                     PydanticAI crew ──► llama.cpp (:8089)
+                                                                          │            local GGUF model
+ Prefect server (:4200) ── daily archive-ingest flow ──► NASA archive     ▼
+                                                     snapshots ──► deterministic statistics (crew/science.py)
 ```
 
 | Part | Stack | Location |
 |---|---|---|
 | Frontend | Vue 3.5, Vite 8, axios | `LCARS/` |
 | Backend | Python 3.14, Django 6.1, Wagtail 8.0, Django REST Framework | `wagtail/LCARSAPP/` |
-| Agents | [PydanticAI](https://ai.pydantic.dev/) | planned |
-| Orchestration | [Prefect](https://www.prefect.io/): scheduled archive ingestion, and missions made durable with PydanticAI's `PrefectDurability` | built |
-| Evals | [DeepEval](https://deepeval.com/): graded against known answers and tool calls, not just prose | planned |
+| Agents | [PydanticAI](https://ai.pydantic.dev/) | `wagtail/LCARSAPP/crew/agents.py` |
+| Statistics | pandas, NumPy | `wagtail/LCARSAPP/crew/science.py` |
+| Orchestration | [Prefect](https://www.prefect.io/): mission flows (with `PrefectDurability`) and the scheduled archive ingest | `crew/flow.py`, `crew/ingest.py` |
+| Model | [llama.cpp](https://github.com/ggml-org/llama.cpp) serving a local GGUF model | `scripts/model-server.sh` |
+| Evals | [DeepEval](https://deepeval.com/) metrics graded from mission logs | `wagtail/LCARSAPP/evals/` |
+| Red team | [DeepTeam](https://www.trydeepteam.com/) with hard invariants | `missions/management/commands/red_team.py` |
+| Mission log | Django models and admin, JSON API | `wagtail/LCARSAPP/missions/` |
 
-Still undecided: which model provider to use, and which data store to use for the planet snapshot.
+## Models
 
-## Fresh data on a schedule
+Any `.gguf` file in `~/models` (or `$CREW_MODELS_DIR`) appears in the bridge's model picker. Choosing one starts its server and stops any other, so only one model is in memory.
 
-A Prefect flow (`archive-ingest`, in `wagtail/LCARSAPP/crew/ingest.py`) fetches the NASA Exoplanet Archive, validates it, saves a hashed snapshot, and records what changed since the previous one: new planets, removals, and revised measurements. Each fetch is a **Snapshot** in the Django admin. Missions analyze the newest snapshot, and Ops reports what changed.
+| Model | Download | Size | Notes |
+|---|---|---|---|
+| Qwen3.5-9B (Q4_K_M) | `scripts/download-models.sh qwen` | 5.7 GB | Tested end to end; about 10 tokens/s on an M1 |
+| Gemma 4 12B (Q4_K_M) | `scripts/download-models.sh gemma` | 7.1 GB | Loads and calls tools; about 8 tokens/s on an M1 |
+| Test model | built in | none | Random schema-valid output; for rehearsing the flow and gates, not analysis |
 
-```bash
-cd wagtail/LCARSAPP
-uv run prefect server start                        # terminal 1: Prefect server and UI at http://127.0.0.1:4200
-uv run python manage.py serve_ingest               # terminal 2: runs the flow daily at 06:00 Eastern
-uv run python manage.py ingest_archive             # or fetch once, now
-```
+## Services and ports
 
-`serve_ingest` takes `--cron` and `--timezone`. Schedules only fire while both processes are running and the Mac is awake. You can also fetch from the LCARS bridge (Missions → New mission → **Fetch latest data**). Downloaded snapshots live in `crew/data/snapshots/` (gitignored). The October 7 baseline stays pinned in the repo.
+| Port | Service | Started by |
+|---|---|---|
+| 8080 | LCARS bridge | `scripts/start.sh` |
+| 8000 | Django API, Wagtail admin (`/admin`), Django admin (`/django-admin`) | `scripts/start.sh` |
+| 4200 | Prefect server and UI | `scripts/start.sh` |
+| 8089 | Local model server (requires the key in `.env.local`) | the bridge, when a mission launches |
 
-## Installation
+Logs and process IDs are in `wagtail/LCARSAPP/run/`. The daily data fetch runs at 06:00 America/New_York while `start.sh`'s services are up and the machine is awake.
 
-You need [uv](https://docs.astral.sh/uv/) for the backend and Node.js for the frontend. Run them in separate terminals.
+## Commands
 
-### Backend: Wagtail CMS
-
-```bash
-cd wagtail/LCARSAPP
-uv venv
-uv pip sync requirements.txt
-uv run python manage.py migrate
-uv run python manage.py createsuperuser
-uv run python manage.py runserver
-```
-
-The API runs at http://localhost:8000/api/v2/ and the Wagtail admin at http://localhost:8000/admin/.
-
-### Frontend: LCARS (Vue + Vite)
+From `wagtail/LCARSAPP`:
 
 ```bash
-cd LCARS
-npm install
-npm start
+uv run python manage.py run_mission                    # a mission from the terminal; gates wait for the bridge
+uv run python manage.py run_mission --negative-control # the crew should find nothing
+uv run python manage.py ingest_archive                 # fetch NASA data now
+uv run python manage.py bakeoff --runs 1 --stations ops,science   # score the loaded model
+uv run python manage.py red_team                       # DeepTeam attacks plus hard invariants
+uv run python manage.py test                           # unit and integration tests (no model needed)
+uv run deepeval test run evals/test_missions.py        # grade completed real-model missions
 ```
 
-The app runs at http://localhost:8080, the origin the backend's CORS settings allow.
+Real-model commands need a model server: launch from the bridge, or run `scripts/model-server.sh ~/models/<model>.gguf` and set `CREW_MODEL` to the model's name.
 
-## Testing
+## Configuration
 
-```bash
-cd wagtail/LCARSAPP
-uv run python manage.py test
-```
+Set in the environment or in `wagtail/LCARSAPP/.env.local` (loaded automatically):
 
-The agent evals will live alongside the tests. Each graded question has a known answer, so "the Computer said something plausible" doesn't count as passing.
+| Variable | Default | Purpose |
+|---|---|---|
+| `ADMIN_USERNAME`, `ADMIN_PASSWORD` | generated by `setup.sh` | Admin login |
+| `CREW_MODEL_KEY` | generated by `setup.sh` | Key the model server requires |
+| `CREW_MODELS_DIR` | `~/models` | Where `.gguf` models live |
+| `CREW_MAX_TOKENS` | `1500` | Maximum tokens per model response |
+| `CREW_REQUEST_TIMEOUT` | `240` | Seconds per model request |
+| `CREW_TEMPERATURE` | `0.2` | Sampling temperature |
+| `PREFECT_API_URL` | `http://127.0.0.1:4200/api` (set by `start.sh`) | Prefect server for schedules and run history |
+
+## Troubleshooting
+
+- **"Authorization required" on the bridge.** Log in at http://localhost:8000/admin first, then return to the bridge tab.
+- **A port is already in use.** Run `scripts/stop.sh`, then `scripts/start.sh`. `start.sh` reports what's on a busy port rather than starting a second copy.
+- **"No model loaded" or the model never comes online.** Check that a `.gguf` is in `~/models` and that `llama-server --version` works; see `wagtail/LCARSAPP/run/model-server.log`. Close memory-heavy apps: the models use 6–8 GB.
+- **A mission stalls overnight.** macOS sleep pauses everything. `start.sh` keeps the Mac awake while services run; plug in power for long sessions.
+- **NASA archive unreachable.** Missions use the newest snapshot on disk, or the pinned baseline. Retry with `uv run python manage.py ingest_archive`.
+- **Start over with a clean database.** `scripts/stop.sh`, delete `wagtail/LCARSAPP/db.sqlite3*`, then `scripts/setup.sh`.
+
+## Other platforms
+
+The project is developed on macOS (Apple Silicon). On Linux, install uv, Node.js 22+, and llama.cpp (`llama-server` on your `PATH`), then follow the same steps; `caffeinate` (keeping the machine awake) is skipped automatically. Windows is untested; WSL2 is the likeliest route.
 
 ## Developer path
 
@@ -111,8 +172,10 @@ This project uses [uv](https://docs.astral.sh/uv/) for Python:
 
 - Python is installed and managed by uv, pinned in `wagtail/LCARSAPP/.python-version` (3.14). Don't use the macOS system `python3` or Homebrew Python.
 - One virtual environment per project, `wagtail/LCARSAPP/.venv`, created with `uv venv`.
-- Top-level packages are listed in `requirements.in` and pinned in `requirements.txt` with `uv pip compile requirements.in -o requirements.txt`. uv environments have no `pip`, so "No module named pip" is expected.
+- Top-level packages are listed in `requirements.in`; pin them for every platform with `uv pip compile requirements.in -o requirements.txt --universal --python-version 3.14`, then install with `uv pip sync requirements.txt`. uv environments have no `pip`, so "No module named pip" is expected.
 - Run commands with `uv run ...`, or after `source .venv/bin/activate`.
+
+See [AGENTS.md](AGENTS.md) for conventions when changing the code, [docs/recording.md](docs/recording.md) for recording missions, and [docs/talk-plan.md](docs/talk-plan.md) for the talk.
 
 ## Origins
 
@@ -124,9 +187,11 @@ LCARS Online started as a fork of [LCARS-on-Wagtail](https://github.com/dawnwage
 
 ## Credits
 
-Shout out to Lou Huang ([@saikofish](https://twitter.com/saikofish), [louh/lcars](https://github.com/louh/lcars)) for the LCARS UI. Exoplanet data comes from the NASA Exoplanet Archive, operated by Caltech under contract with NASA.
+- LCARS UI by Lou Huang ([@saikofish](https://twitter.com/saikofish), [louh/lcars](https://github.com/louh/lcars)).
+- Data from the [NASA Exoplanet Archive](https://exoplanetarchive.ipac.caltech.edu/), operated by the California Institute of Technology under contract with NASA.
+- The radius valley: Fulton et al. 2017, *The California-Kepler Survey. III.*
+- Built with Wagtail, Django, PydanticAI, Prefect, DeepEval, DeepTeam, llama.cpp, and the Qwen and Gemma open-weight models.
 
-Built by Dawn Wages:
+Star Trek and LCARS are trademarks of CBS Studios / Paramount. This is a fan project, not affiliated with or endorsed by them.
 
-- Website: [dawnwages.info](https://dawnwages.info)
-- Blog: [Bajoran Engineer](https://dawnwages.info/bajoran-engineer/)
+Built by Dawn Wages ([dawnwages.info](https://dawnwages.info), [Bajoran Engineer](https://dawnwages.info/bajoran-engineer/)).

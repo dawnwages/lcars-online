@@ -1,57 +1,48 @@
 # Recording missions
 
-The talk uses recorded missions, not live demos. Every mission, recorded or not, is logged in the Django admin under **Missions** with its full event log, gates, plan, results, and review.
+The talk uses recorded missions, not live demos. Every mission, recorded or not, is kept in the mission log (the bridge's **Missions** view and the Django admin) with its full event log, gates, plan, results, and review.
 
 ## Before recording
 
-1. **Plug in the power adapter and keep the Mac awake.** macOS sleeps an idle laptop, which pauses the model mid-mission. Wrap long runs in `caffeinate -is`.
-2. **Close everything you don't need.** On a 16 GB M1, the model takes about 6 GB. Leave room for the browser, the Django server, and the screen recorder.
-3. **Start the model server** (port 8089):
+1. **Plug in the power adapter.** `scripts/start.sh` keeps the Mac awake while services run, but long missions on battery are slow.
+2. **Close what you don't need.** On a 16 GB M1 the model uses about 6 GB; leave room for the browser and the screen recorder.
+3. **Start everything and log in:**
 
    ```bash
-   caffeinate -is scripts/model-server.sh ~/models/Qwen3.5-9B-Q4_K_M.gguf
+   scripts/start.sh
    ```
 
-4. **Start Django** in another terminal (from `wagtail/LCARSAPP`):
+   Log in at http://localhost:8000/admin as `captain` (password in `wagtail/LCARSAPP/.env.local`), then open http://localhost:8080 → **Missions**.
+4. **Fetch fresh data** (optional): **New mission → Fetch latest data**. The panel shows the planet count and what changed.
 
-   ```bash
-   uv run python manage.py runserver
-   ```
+## Recording a mission (best for the talk)
 
-5. **Optional: a persistent Prefect UI.** Missions run on a temporary Prefect server by default, which disappears afterward. To show flow runs in the Prefect UI, start one first and point the crew at it:
+1. **New mission**: keep the question, choose **Qwen3.5-9B**, type **Analysis**, seed **0**, then **Engage**. The model loads in about 10 seconds.
+2. Watch the event stream. At each gate, read what's being approved (the data card's hazards; the plan and how it answers each hazard), then **Make it so**. Add a note; it goes in the log.
+3. A mission takes about 15–20 minutes on an M1. Record the whole run, then speed up the waiting in editing, and say on screen that it's sped up.
+4. Record a second mission with type **Negative control**. The crew should find no valley.
 
-   ```bash
-   uv run prefect server start
-   export PREFECT_API_URL=http://127.0.0.1:4200/api
-   ```
+Moments worth keeping in the edit:
 
-## Two ways to record a mission
+- The Science Officer's plan being **returned** by the validator ("H3 points to a filter on pl_rade…") and the revised plan.
+- Engineering's specification curve and negative control.
+- Tactical's verdict, and the draft Captain's Log you publish at the last gate.
 
-**With live approvals (best for the talk video).** The mission waits at each gate, and you approve it on camera in the admin under Missions → Gates → select the gate → "Approve selected gates (make it so)".
+## Unattended recordings
+
+From `wagtail/LCARSAPP`, with every gate pre-approved (the log records who pre-approved it and how):
 
 ```bash
-cd wagtail/LCARSAPP
-CREW_MODEL=Qwen3.5-9B-Q4_K_M CREW_OUTPUT_MODE=tool caffeinate -is uv run python manage.py run_mission
+CREW_MODEL=Qwen3.5-9B-Q4_K_M uv run python manage.py run_mission --approve-as "Dawn Wages"
 ```
 
-**Unattended.** Every gate is pre-approved, and the log records who pre-approved it and how.
-
-```bash
-CREW_MODEL=Qwen3.5-9B-Q4_K_M CREW_OUTPUT_MODE=tool caffeinate -is uv run python manage.py run_mission --approve-as "Dawn Wages"
-```
-
-Add `--negative-control` to record the run where the crew should find nothing.
-
-## Capture
-
-- Use macOS Screenshot (Shift-Command-5) → Record Selected Portion, or OBS.
-- A mission takes several minutes on the M1. Record the whole run, then speed up the waiting stretches in editing. Say on screen that the footage is sped up.
-- After uploading, paste the video link into the mission's **Recording URL** field in the admin, so each recording points back to its exact run: model, data snapshot hash, seed, git commit, and every decision.
+This needs the model server running: launch any mission from the bridge first, or run `scripts/model-server.sh ~/models/Qwen3.5-9B-Q4_K_M.gguf`.
 
 ## After recording
 
-Grade the recorded missions:
+- Paste the video link into the mission's **Recording URL** in the Django admin, so each recording points back to its exact run: model, data snapshot and hash, seed, git commit, and every decision.
+- Grade the missions:
 
-```bash
-uv run deepeval test run evals/test_missions.py
-```
+  ```bash
+  cd wagtail/LCARSAPP && uv run deepeval test run evals/test_missions.py
+  ```
