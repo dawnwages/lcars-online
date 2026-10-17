@@ -1,9 +1,9 @@
 """The crew: one narrow PydanticAI agent per station, each with its own tools."""
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 import pandas as pd
-from pydantic_ai import Agent, NativeOutput, PromptedOutput, RunContext, ToolOutput
+from pydantic_ai import Agent, ModelRetry, NativeOutput, PromptedOutput, RunContext, ToolOutput
 from pydantic_ai.models.openai import OpenAIChatModel
 from pydantic_ai.providers.openai import OpenAIProvider
 
@@ -36,6 +36,59 @@ def make_model():
 class CrewDeps:
     recorder: MissionRecorder
     df: pd.DataFrame
+    # Ops' hazards with IDs ({"id", "name", "implication"}); every plan must answer each one
+    hazards: list = field(default_factory=list)
+
+
+def number_hazards(brief):
+    """Give Ops' hazards stable IDs (H1, H2, ...) for the plan to answer."""
+    return [{"id": f"H{i}", "name": h.name, "evidence": h.evidence, "implication": h.implication}
+            for i, h in enumerate(brief.hazards, start=1)]
+
+
+def hazard_checklist(hazards):
+    lines = [f"{h['id']}. {h['name']}: {h['evidence']}. Implication: {h['implication']}"
+             for h in hazards]
+    return ("Hazard checklist. Your plan's hazard_responses must answer EVERY item, once each:\n"
+            + "\n".join(lines))
+
+
+# The analysis variable itself; Engineering already restricts it to science.WINDOW
+ANALYSIS_COLUMN = "pl_rade"
+
+
+def hazard_problems(plan, hazards):
+    """What's wrong with a plan's hazard responses. Empty means every hazard is answered."""
+    problems = []
+    ids = {h["id"]: h for h in hazards}
+    answered = {}
+    for r in plan.hazard_responses:
+        if r.hazard_id not in ids:
+            problems.append(f"{r.hazard_id} is not on the checklist (valid IDs: {', '.join(ids)}).")
+            continue
+        if r.hazard_id in answered:
+            problems.append(f"{r.hazard_id} is answered more than once; give one response.")
+        answered[r.hazard_id] = r
+        name = ids[r.hazard_id]["name"]
+        if r.response == "filter":
+            n = r.filter_number
+            if n is None or not 1 <= n <= len(plan.population):
+                problems.append(f"{r.hazard_id} ({name}) says 'filter' but filter_number {n} is not "
+                                f"one of your {len(plan.population)} population filters.")
+            elif plan.population[n - 1].column == ANALYSIS_COLUMN:
+                problems.append(
+                    f"{r.hazard_id} ({name}) points to a filter on {ANALYSIS_COLUMN}, the variable "
+                    f"being analyzed; Engineering already applies the {science.WINDOW[0]}-"
+                    f"{science.WINDOW[1]} Earth-radius window, so that filter does not address a "
+                    "data hazard. Filter on the column the hazard is about, or accept the risk.")
+        elif len(r.explanation.strip()) < 40:
+            problems.append(f"{r.hazard_id} ({name}) accepts the risk without a real explanation; "
+                            "say why it can't or needn't be handled.")
+    for hid, h in ids.items():
+        if hid not in answered:
+            problems.append(f"{hid} ({h['name']}) has no response. Add a population filter that "
+                            "handles it, or accept the risk and explain why.")
+    return problems
 
 
 def _agent(name, output_type, instructions, tools=(), capabilities=()):
@@ -88,6 +141,9 @@ The plan is approved by the captain and then executed exactly, so choose careful
   for the valley location. You choose the population, the bandwidth and the significance level.
 - Name the result that would falsify the hypothesis, alternatives you rejected and why,
   and the risks to the conclusion.
+- Answer every item on the hazard checklist in hazard_responses: either point to the
+  population filter that handles it, or accept the risk and explain why. Unanswered hazards
+  are sent back to you.
 Engineering will also always run a sweep of precision cuts and a negative control."""
 
 TACTICAL = """You are Tactical, the adversarial reviewer. Your job is to find reasons NOT to
@@ -103,11 +159,24 @@ chosen, what the reviewer raised, and the limitations. No hype; never claim more
 evidence supports. Write in the first person plural ("we")."""
 
 
+def check_plan_hazards(ctx: RunContext[CrewDeps], plan: AnalysisPlan) -> AnalysisPlan:
+    """Enforced in code: a plan that leaves a hazard unanswered goes back to the model."""
+    problems = hazard_problems(plan, ctx.deps.hazards)
+    if problems:
+        ctx.deps.recorder.log(MissionEvent.Station.SCIENCE, MissionEvent.Kind.NOTE,
+                              "Plan returned: hazards not answered",
+                              rationale="\n".join(problems), payload=plan.model_dump())
+        raise ModelRetry("Revise the plan. " + " ".join(problems))
+    return plan
+
+
 def build_crew(capabilities=()):
+    science_officer = _agent("science_officer", AnalysisPlan, SCIENCE,
+                             tools=[count_population, column_summary], capabilities=capabilities)
+    science_officer.output_validator(check_plan_hazards)
     return {
         "ops": _agent("ops", OpsBrief, OPS, capabilities=capabilities),
-        "science": _agent("science_officer", AnalysisPlan, SCIENCE,
-                          tools=[count_population, column_summary], capabilities=capabilities),
+        "science": science_officer,
         "tactical": _agent("tactical", Review, TACTICAL, tools=[count_population],
                            capabilities=capabilities),
         "log": _agent("captains_log", CaptainsLog, LOG, capabilities=capabilities),

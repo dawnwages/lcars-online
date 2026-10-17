@@ -1,7 +1,7 @@
 import json
 
 from django.contrib.auth import get_user_model
-from django.test import Client, TestCase
+from django.test import Client, TestCase, TransactionTestCase
 
 from .models import Gate, Mission
 from .recorder import MissionRecorder
@@ -141,3 +141,95 @@ class FetchDataAPITests(TestCase):
             launch.assert_called_once()
         with mock.patch("crew.runtime.ingest_running", return_value=True):
             self.assertEqual(self.client.post("/api/crew/fetch/").status_code, 409)
+
+
+class HazardCheckTests(TestCase):
+    """A plan must answer every hazard Ops raised; this is enforced in code."""
+
+    HAZARDS = [
+        {"id": "H1", "name": "Discovery-method selection bias", "evidence": "median period 8 d vs 305 d",
+         "implication": "Restrict or compare by discovery method"},
+        {"id": "H2", "name": "Inferred masses", "evidence": "47% from M-R relation",
+         "implication": "Don't use mass as if measured"},
+    ]
+
+    def plan(self, population, responses):
+        from crew.schemas import AnalysisPlan
+        return AnalysisPlan(
+            hypothesis="Two populations", null_hypothesis="One population",
+            population=population, bandwidth_dex=0.04, significance_level=0.05,
+            falsification="Silverman p >= 0.05 across the precision sweep",
+            alternatives_considered=[{"option": "All methods", "why_not": "mixes selection effects"}],
+            risks=["Small sample"], hazard_responses=responses)
+
+    def test_qwen_bakeoff_plan_is_rejected(self):
+        # The plan Qwen3.5-9B produced in all three bake-off runs, now with token responses
+        from crew.agents import hazard_problems
+        plan = self.plan(
+            [{"column": "pl_rade", "op": "ge", "value": 1.0, "reason": "window"},
+             {"column": "pl_rade", "op": "le", "value": 4.0, "reason": "window"}],
+            [{"hazard_id": "H1", "response": "filter", "filter_number": 1, "explanation": "window"}])
+        problems = hazard_problems(plan, self.HAZARDS)
+        self.assertTrue(any("variable being analyzed" in p for p in problems))
+        self.assertTrue(any(p.startswith("H2") and "no response" in p for p in problems))
+
+    def test_plan_answering_every_hazard_passes(self):
+        from crew.agents import hazard_problems
+        plan = self.plan(
+            [{"column": "disc_method", "op": "eq", "value": "tran", "reason": "one selection function"}],
+            [{"hazard_id": "H1", "response": "filter", "filter_number": 1,
+              "explanation": "Transit only, so one detection bias"},
+             {"hazard_id": "H2", "response": "accept_risk", "filter_number": None,
+              "explanation": "The analysis uses radius only, so inferred masses never enter it"}])
+        self.assertEqual(hazard_problems(plan, self.HAZARDS), [])
+
+    def test_bad_responses_are_named(self):
+        from crew.agents import hazard_problems
+        plan = self.plan(
+            [{"column": "disc_method", "op": "eq", "value": "tran", "reason": "x"}],
+            [{"hazard_id": "H1", "response": "filter", "filter_number": 5, "explanation": "x"},
+             {"hazard_id": "H2", "response": "accept_risk", "explanation": "n/a"},
+             {"hazard_id": "H9", "response": "accept_risk", "explanation": "made-up hazard " * 4}])
+        problems = " ".join(hazard_problems(plan, self.HAZARDS))
+        self.assertIn("filter_number 5", problems)
+        self.assertIn("without a real explanation", problems)
+        self.assertIn("H9 is not on the checklist", problems)
+
+
+
+class HazardRetryTests(TransactionTestCase):
+    """Real transactions: PydanticAI runs the validator in a worker thread that logs to the DB."""
+
+    HAZARDS = HazardCheckTests.HAZARDS
+    plan = HazardCheckTests.plan
+
+    def test_science_officer_is_sent_back_until_hazards_are_answered(self):
+        """End to end with a scripted model: first plan ignores H2, the retry fixes it."""
+        import pandas as pd
+        from pydantic_ai.messages import ModelResponse, ToolCallPart
+        from pydantic_ai.models.function import FunctionModel
+        from crew import agents, science
+
+        bad = {"hazard_id": "H1", "response": "filter", "filter_number": 1, "explanation": "transit"}
+        good = {"hazard_id": "H2", "response": "accept_risk",
+                "explanation": "Only radius is analyzed, so inferred masses never enter it"}
+        base = self.plan([{"column": "disc_method", "op": "eq", "value": "tran", "reason": "x"}],
+                         [bad]).model_dump()
+        calls = []
+
+        def scripted(messages, info):
+            calls.append(1)
+            responses = [bad] if len(calls) == 1 else [bad, good]
+            return ModelResponse(parts=[ToolCallPart(info.output_tools[0].name,
+                                                     {**base, "hazard_responses": responses})])
+
+        mission = Mission.objects.create(question="Gap?")
+        deps = agents.CrewDeps(recorder=MissionRecorder(mission), df=pd.DataFrame(),
+                               hazards=self.HAZARDS)
+        crew = agents.build_crew()
+        with crew["science"].override(model=FunctionModel(scripted)):
+            plan = crew["science"].run_sync("Plan it", deps=deps).output
+        self.assertEqual(len(calls), 2)
+        self.assertEqual({r.hazard_id for r in plan.hazard_responses}, {"H1", "H2"})
+        returned = mission.events.get(title="Plan returned: hazards not answered")
+        self.assertIn("H2", returned.rationale)

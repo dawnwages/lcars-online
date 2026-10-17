@@ -38,8 +38,11 @@ class Command(BaseCommand):
 
     def add_arguments(self, parser):
         parser.add_argument("--runs", type=int, default=3)
+        parser.add_argument("--stations", default="ops,science,tactical,log",
+                            help="Comma-separated stations to score (Science needs Ops first)")
 
-    def handle(self, runs, **options):
+    def handle(self, runs, stations, **options):
+        stations = set(stations.split(","))
         df, sha = science.load_snapshot()
         card = science.data_card(df)
         mission = Mission.objects.create(question=f"Model bake-off: {agents.MODEL_NAME}",
@@ -81,9 +84,16 @@ class Command(BaseCommand):
                 "flags_method_selection": "selection" in text or "discovery method" in text,
             }})
 
-            plan, t, meta = timed(crew["science"], "science", (
-                f"Question: {QUESTION}\nOps brief:\n{brief.model_dump_json() if brief else ''}\n"
-                f"Columns: {card['columns']}"))
+            if "science" not in stations:
+                plan = None
+            else:
+                deps.hazards = agents.number_hazards(brief) if brief else []
+                returns_before = mission.events.filter(title="Plan returned: hazards not answered").count()
+                plan, t, meta = timed(crew["science"], "science", (
+                    f"Question: {QUESTION}\nOps brief:\n{brief.summary if brief else ''}\n\n"
+                    f"{agents.hazard_checklist(deps.hazards)}\n\nColumns: {card['columns']}"))
+                meta["hazard_returns"] = mission.events.filter(
+                    title="Plan returned: hazards not answered").count() - returns_before
             checks = {}
             if plan:
                 filters = [f.model_dump(exclude={"reason"}) for f in plan.population]
@@ -95,14 +105,18 @@ class Command(BaseCommand):
                 except Exception:
                     n = 0
                 checks = {
+                    "answers_every_hazard": not agents.hazard_problems(plan, deps.hazards),
                     "restricts_to_transit": ("disc_method", "eq", "tran") in cols,
                     "cuts_radius_precision": any(c[0] == "rade_rel_err" for c in cols),
                     "checked_sample_size": "count_population" in meta.get("tools", []),
                     "enough_planets": n >= science.MIN_SAMPLE,
                     "states_falsification": len(plan.falsification) > 20,
                 }
-            scores["science"].append({"valid": plan is not None, "seconds": t, **meta,
-                                      "checks": checks})
+            if "science" in stations:
+                scores["science"].append({"valid": plan is not None, "seconds": t, **meta,
+                                          "checks": checks})
+            if not stations & {"tactical", "log"}:
+                continue
 
             review, t, meta = timed(crew["tactical"], "tactical", (
                 f"Question: {QUESTION}\nResults:\n{json.dumps(flawed_results())}"))
@@ -124,19 +138,25 @@ class Command(BaseCommand):
 
         summary = {}
         for station, rows in scores.items():
+            if not rows:
+                continue
             checks = [v for r in rows for v in r["checks"].values()]
             summary[station] = {
                 "valid_pct": round(100 * sum(r["valid"] for r in rows) / len(rows)),
                 "checks_pct": round(100 * sum(checks) / len(checks)) if checks else 0,
                 "median_seconds": round(statistics.median(r["seconds"] for r in rows), 1),
                 "retries": sum(r.get("retries", 0) for r in rows),
+                "hazard_returns": sum(r.get("hazard_returns", 0) for r in rows),
             }
         rec.set_status(Mission.Status.COMPLETE, finished_at=timezone.now(),
                        result={"summary": summary, "runs": scores},
                        verdict=json.dumps({k: v["checks_pct"] for k, v in summary.items()}))
         self.stdout.write(f"\n{agents.MODEL_NAME} ({agents.OUTPUT_MODE} output), {runs} runs")
-        self.stdout.write(f"{'station':10} {'valid%':>7} {'checks%':>8} {'med s':>7} {'retries':>8}")
+        self.stdout.write(f"{'station':10} {'valid%':>7} {'checks%':>8} {'med s':>7} {'retries':>8} {'hazard returns':>15}")
         for station, s in summary.items():
             self.stdout.write(f"{station:10} {s['valid_pct']:7} {s['checks_pct']:8} "
-                              f"{s['median_seconds']:7} {s['retries']:8}")
+                              f"{s['median_seconds']:7} {s['retries']:8} {s['hazard_returns']:15}")
+        if "science" in scores:
+            for i, r in enumerate(scores["science"], 1):
+                self.stdout.write(f"  science run {i}: {r['checks']}")
         self.stdout.write(f"Logged as mission {mission.pk}")

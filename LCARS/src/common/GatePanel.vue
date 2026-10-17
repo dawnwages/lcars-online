@@ -22,6 +22,25 @@
           <span class="key">Alpha</span> {{ summary.significance_level }}
         </p>
         <p><span class="key">Falsified if</span> {{ summary.falsification }}</p>
+        <div v-if="summary.hazard_responses?.length">
+          <div class="key">Hazards answered</div>
+          <ul class="hazards">
+            <li v-for="r in summary.hazard_responses" :key="r.hazard_id"
+                :class="{ accepted: r.response === 'accept_risk' }">
+              <b>{{ r.hazard_id }} {{ hazardName(r.hazard_id) }}</b>:
+              <template v-if="r.response === 'filter'">
+                handled by filter {{ r.filter_number }}
+                <code v-if="summary.population[r.filter_number - 1]">
+                  {{ summary.population[r.filter_number - 1].column }}
+                  {{ opSymbol(summary.population[r.filter_number - 1].op) }}
+                  {{ summary.population[r.filter_number - 1].value ?? '' }}
+                </code>.
+              </template>
+              <template v-else>risk accepted, your call.</template>
+              <span class="reason">{{ r.explanation }}</span>
+            </li>
+          </ul>
+        </div>
         <div v-if="summary.alternatives_considered?.length">
           <div class="key">Alternatives rejected</div>
           <ul><li v-for="(a, i) in summary.alternatives_considered" :key="i">{{ a.option }}: {{ a.why_not }}</li></ul>
@@ -82,6 +101,7 @@ export default {
   },
   methods: {
     opSymbol(op) { return OPS[op] || op },
+    hazardName(id) { return (this.summary.hazards || []).find(h => h.id === id)?.name || '' },
     async decide(decision) {
       this.busy = true
       this.error = ''
@@ -132,6 +152,8 @@ export default {
   margin-right: 6px;
 }
 .filters { margin: 4px 0 8px; padding-left: 24px; }
+.hazards { margin: 4px 0 8px; padding-left: 20px; }
+.hazards li.accepted b { color: var(--lcars-color-b3); }
 code { color: var(--lcars-color-b1); }
 .reason { color: #999; margin-left: 6px; }
 .gate-actions { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-top: 8px; }

@@ -12,9 +12,10 @@ from django.utils import timezone
 from prefect import flow, get_run_logger
 from prefect.runtime import flow_run
 from pydantic_ai.durable_exec.prefect import PrefectDurability
+from pydantic_ai.exceptions import UnexpectedModelBehavior
 
 from crew import science
-from crew.agents import MODEL_NAME, CrewDeps, build_crew, run_station
+from crew.agents import MODEL_NAME, CrewDeps, build_crew, hazard_checklist, number_hazards, run_station
 from missions.models import Gate, Mission, MissionEvent, Snapshot
 from missions.recorder import GateRejected, MissionRecorder
 
@@ -121,9 +122,10 @@ def away_mission(mission_id: int, gate_policies: dict | None = None):
         deps = CrewDeps(recorder=rec, df=df)
         brief = run_station(crew["ops"], S.OPS,
                             f"Data card:\n{json.dumps(card, default=str)}", deps)
-        for h in brief.hazards:
-            rec.log(S.OPS, K.DECISION, f"Hazard: {h.name}", rationale=h.implication,
-                    payload={"evidence": h.evidence})
+        deps.hazards = number_hazards(brief)
+        for h in deps.hazards:
+            rec.log(S.OPS, K.DECISION, f"Hazard {h['id']}: {h['name']}", rationale=h["implication"],
+                    payload={"evidence": h["evidence"]})
         rec.request_gate(Gate.Name.DATA_CARD, {"brief": brief.model_dump(), "data_card": card},
                          policy=gate_policies.get(Gate.Name.DATA_CARD))
 
@@ -131,8 +133,8 @@ def away_mission(mission_id: int, gate_policies: dict | None = None):
         for attempt in range(MAX_REVISIONS + 1):
             # Science Officer: pre-register the plan
             plan = run_station(crew["science"], S.SCIENCE, (
-                f"Question: {mission.question}\n\nOps brief:\n{brief.model_dump_json()}\n\n"
-                f"Columns: {card['columns']}\n{feedback}"), deps)
+                f"Question: {mission.question}\n\nOps brief:\n{brief.summary}\n\n"
+                f"{hazard_checklist(deps.hazards)}\n\nColumns: {card['columns']}\n{feedback}"), deps)
             rec.log(S.SCIENCE, K.DECISION, f"Analysis plan (attempt {attempt + 1})",
                     rationale=plan.hypothesis,
                     alternatives=[a.model_dump() for a in plan.alternatives_considered],
@@ -140,7 +142,8 @@ def away_mission(mission_id: int, gate_policies: dict | None = None):
             rec.set_status(Mission.Status.RUNNING, plan=plan.model_dump())
             # Every plan, including a revision, is approved before it runs
             gate = Gate.Name.PLAN if attempt == 0 else Gate.Name.PLAN_REVISION
-            rec.request_gate(gate, plan.model_dump(), policy=gate_policies.get(gate))
+            rec.request_gate(gate, {**plan.model_dump(), "hazards": deps.hazards},
+                             policy=gate_policies.get(gate))
 
             # Engineering: run it exactly, or refuse if the sample can't support the test
             try:
@@ -186,6 +189,11 @@ def away_mission(mission_id: int, gate_policies: dict | None = None):
     except science.InsufficientSample as exc:
         rec.set_status(Mission.Status.FAILED, finished_at=timezone.now(),
                        verdict=f"No valid plan: {exc}")
+    except UnexpectedModelBehavior as exc:
+        rec.log(S.SYSTEM, K.ERROR, f"Model could not produce valid output: {exc}")
+        rec.set_status(Mission.Status.FAILED, finished_at=timezone.now(),
+                       verdict=("No valid plan: the crew could not produce output that passes "
+                                "its checks (for example, answering every hazard) within its retries"))
     except GateRejected as exc:
         logger.info("Mission stopped at a gate: %s", exc)
     except Exception as exc:

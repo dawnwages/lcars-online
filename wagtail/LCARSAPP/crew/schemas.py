@@ -33,6 +33,16 @@ class Alternative(BaseModel):
     why_not: str
 
 
+class HazardResponse(BaseModel):
+    hazard_id: str = Field(description="The hazard's ID from the checklist, e.g. 'H1'")
+    response: Literal["filter", "accept_risk"] = Field(
+        description="'filter': a population filter handles it. 'accept_risk': it can't or "
+                    "needn't be handled; explain why")
+    filter_number: int | None = Field(
+        default=None, description="For 'filter': which population filter handles it (1 = first)")
+    explanation: str = Field(description="How this response deals with the hazard")
+
+
 class AnalysisPlan(BaseModel):
     hypothesis: str
     null_hypothesis: str
@@ -44,6 +54,8 @@ class AnalysisPlan(BaseModel):
     falsification: str = Field(description="The result that would make you reject the hypothesis")
     alternatives_considered: list[Alternative] = Field(min_length=1)
     risks: list[str] = Field(min_length=1)
+    hazard_responses: list[HazardResponse] = Field(
+        min_length=1, description="Exactly one response for every hazard on the checklist")
 
 
 class Issue(BaseModel):
