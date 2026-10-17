@@ -24,7 +24,10 @@ class OpsBrief(BaseModel):
 class PopulationFilter(BaseModel):
     column: FilterColumn
     op: FilterOp
-    value: float | str | None = None
+    # Required (not defaulted): with an optional field, constrained tool calls from small
+    # models left it out entirely, even when the model's own text said what it should be
+    value: float | str | None = Field(
+        description="The number or text to compare with, e.g. 1.0 or 'tran'. null only for 'notna'")
     reason: str
 
 
