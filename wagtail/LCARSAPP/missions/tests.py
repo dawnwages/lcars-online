@@ -261,3 +261,48 @@ class StationLimitTests(TransactionTestCase):
         limit = agents.STATION_LIMITS["science"].tool_calls_limit
         self.assertLessEqual(calls.count("column_summary"), limit + 1)
         self.assertGreater(error.payload["model_requests"], 1)
+
+
+class OverCorrectionTests(TestCase):
+    """Regression for mission 8: the revision filtered on mass provenance to answer an
+    inferred-mass hazard, though the method uses radius only; n fell 3,352 -> 621 and the
+    report called an underpowered result 'No Evidence for a Gap'."""
+
+    HAZARDS = HazardCheckTests.HAZARDS
+    plan = HazardCheckTests.plan
+
+    def test_filtering_on_a_column_the_method_never_uses_is_returned(self):
+        from crew.agents import hazard_problems
+        plan = self.plan(
+            [{"column": "disc_method", "op": "eq", "value": "tran", "reason": "one selection"},
+             {"column": "pl_bmassprov", "op": "eq", "value": "Mass", "reason": "measured masses"}],
+            [{"hazard_id": "H1", "response": "filter", "filter_number": 1, "explanation": "transit"},
+             {"hazard_id": "H2", "response": "filter", "filter_number": 2, "explanation": "measured"}])
+        problems = " ".join(hazard_problems(plan, self.HAZARDS))
+        self.assertIn("never uses", problems)
+        self.assertIn("not_applicable", problems)
+
+    def test_not_applicable_with_a_reason_passes(self):
+        from crew.agents import hazard_problems
+        plan = self.plan(
+            [{"column": "disc_method", "op": "eq", "value": "tran", "reason": "one selection"}],
+            [{"hazard_id": "H1", "response": "filter", "filter_number": 1, "explanation": "transit"},
+             {"hazard_id": "H2", "response": "not_applicable",
+              "explanation": "The method analyzes radius only; inferred masses never enter it."}])
+        self.assertEqual(hazard_problems(plan, self.HAZARDS), [])
+
+    def test_report_must_cite_result_statistics_and_invent_none(self):
+        from crew.agents import log_problems
+        from crew.schemas import CaptainsLog
+        evidence = ["{'n': 3352, 'silverman': {'p_value': 0.018}, 'valley': {'radius_earth': 1.719}, "
+                    "'ci95_radius_earth': [1.667, 1.824]}"]
+        vague = CaptainsLog(title="No Evidence for a Gap", intro="We found nothing.",
+                            paragraphs=["We analyzed transit planets.", "The reviewer had concerns."],
+                            limitations=["Small sample."])
+        self.assertTrue(any("State the result" in p for p in log_problems(vague, evidence)))
+        invented = vague.model_copy(update={"intro": "p = 0.29 across 621 planets."})
+        self.assertTrue(any("0.29" in p for p in log_problems(invented, evidence)))
+        good = vague.model_copy(update={
+            "title": "A Valley Near 1.72 Earth Radii",
+            "intro": "Silverman p = 0.018 for 3352 planets; valley at 1.72 (95% CI 1.667-1.824)."})
+        self.assertEqual(log_problems(good, evidence), [])

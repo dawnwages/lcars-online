@@ -36,6 +36,7 @@
                   {{ summary.population[r.filter_number - 1].value ?? '' }}
                 </code>.
               </template>
+              <template v-else-if="r.response === 'not_applicable'">not applicable to this analysis.</template>
               <template v-else>risk accepted, your call.</template>
               <span class="reason">{{ r.explanation }}</span>
             </li>

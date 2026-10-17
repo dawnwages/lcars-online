@@ -132,8 +132,9 @@ class ReportNumbersFaithful(_MissionMetric):
         numbers = set(re.findall(r"\d+\.\d+", text))
         source = str(test_case.context)
         missing = sorted(n for n in numbers if n not in source)
-        return self._done(not missing and bool(numbers),
-                          f"{len(numbers)} numbers, not found in results: {missing}")
+        if not numbers:
+            return self._done(False, "the report cites no statistics (no p-value, valley or interval)")
+        return self._done(not missing, f"{len(numbers)} numbers; not found in results: {missing or 'none'}")
 
 
 class SampleChecked(_MissionMetric):

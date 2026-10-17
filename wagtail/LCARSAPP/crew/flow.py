@@ -180,7 +180,8 @@ def away_mission(mission_id: int, gate_policies: dict | None = None):
             feedback = ("Tactical asked for a revision of the previous plan:\n"
                         + review.model_dump_json())
 
-        # Captain's Log: draft, then a person publishes
+        # Captain's Log: draft, then a person publishes. Its numbers must come from results.
+        deps.evidence = [json.dumps(results, default=str), plan.model_dump_json()]
         log = run_station(crew["log"], S.LOG, (
             f"Question: {mission.question}\nPlan:\n{plan.model_dump_json()}\n"
             f"Results:\n{json.dumps(results, default=str)}\nReview:\n{review.model_dump_json()}"),

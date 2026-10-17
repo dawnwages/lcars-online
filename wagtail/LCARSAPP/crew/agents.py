@@ -89,6 +89,9 @@ def hazard_checklist(hazards):
 
 # The analysis variable itself; Engineering already restricts it to science.WINDOW
 ANALYSIS_COLUMN = "pl_rade"
+# Columns the fixed method never uses: filtering on them can't address a hazard to this
+# analysis, and only costs planets (and adds its own selection)
+UNUSED_BY_METHOD = {"pl_bmasse", "pl_bmasseerr1", "pl_bmasseerr2", "pl_bmassprov"}
 
 
 def hazard_problems(plan, hazards):
@@ -118,9 +121,16 @@ def hazard_problems(plan, hazards):
                     f"being analyzed; Engineering already applies the {science.WINDOW[0]}-"
                     f"{science.WINDOW[1]} Earth-radius window, so that filter does not address a "
                     "data hazard. Filter on the column the hazard is about, or accept the risk.")
+            elif plan.population[n - 1].column in UNUSED_BY_METHOD:
+                problems.append(
+                    f"{r.hazard_id} ({name}) points to a filter on {plan.population[n - 1].column}, "
+                    "which this method never uses (it analyzes planet radius only). That filter "
+                    "removes planets and adds its own selection without protecting this analysis. "
+                    "Drop it and mark the hazard 'not_applicable' with the reason.")
         elif len(r.explanation.strip()) < 40:
-            problems.append(f"{r.hazard_id} ({name}) accepts the risk without a real explanation; "
-                            "say why it can't or needn't be handled.")
+            what = "accepts the risk" if r.response == "accept_risk" else "says not applicable"
+            problems.append(f"{r.hazard_id} ({name}) {what} without a real explanation; "
+                            "say why in a sentence.")
     for hid, h in ids.items():
         if hid not in answered:
             problems.append(f"{hid} ({h['name']}) has no response. Add a population filter that "
@@ -184,9 +194,12 @@ The plan is approved by the captain and then executed exactly, so choose careful
   for the valley location. You choose the population, the bandwidth and the significance level.
 - Name the result that would falsify the hypothesis, alternatives you rejected and why,
   and the risks to the conclusion.
-- Answer every item on the hazard checklist in hazard_responses: either point to the
-  population filter that handles it, or accept the risk and explain why. Unanswered hazards
-  are sent back to you.
+- Answer every item on the hazard checklist in hazard_responses: point to the population
+  filter that handles it, accept the risk and explain it, or mark it not_applicable and
+  explain why it doesn't affect this analysis. The method uses planet radius only, so a
+  hazard about another column (such as mass) is usually not_applicable. Every filter costs
+  planets and statistical power; filter only for hazards that threaten this analysis.
+  Unanswered hazards are sent back to you.
 Engineering will also always run a sweep of precision cuts and a negative control."""
 
 TACTICAL = """You are Tactical, the adversarial reviewer. Your job is to find reasons NOT to
@@ -197,11 +210,16 @@ setting. The negative control must find no valley; if it does, the method is bro
 Accept only if the conclusion survives. Ask for revision if a fixable flaw remains."""
 
 LOG = """You write the Captain's Log: a short public report of the mission for data
-scientists. State the finding with its numbers and uncertainty, how the population was
-chosen, what the reviewer raised, and the limitations. No hype; never claim more than the
-evidence supports. Write in the first person plural ("we")."""
+scientists. State the finding with its numbers from the results (Silverman p-value, valley
+location and its 95% interval, sample size), how the population was chosen, what the
+reviewer raised, and the limitations. No hype; never claim more than the evidence supports.
+A result that isn't significant is "not significant at this sample size", not "no
+evidence", unless the sample was large. Use only numbers from the results. Write in the
+first person plural ("we")."""
 
 
+# Conventions, not results: confidence levels ("95% CI")
+CONVENTIONAL = {"90%", "95%", "99%"}
 _NUMBER = re.compile(r"(?<![\w.])-?\d+(?:\.\d+)?%?")
 
 
@@ -224,6 +242,8 @@ def unsupported_numbers(text, evidence):
     known = _values(" ".join(evidence))
     missing = []
     for token in _NUMBER.findall(text):
+        if token in CONVENTIONAL:
+            continue
         is_pct = token.endswith("%")
         raw = token.rstrip("%")
         value = float(raw)
@@ -254,6 +274,32 @@ def check_review_numbers(ctx: RunContext[CrewDeps], review: Review) -> Review:
     return review
 
 
+def log_problems(log, evidence):
+    """What's wrong with a report's numbers. Empty means it cites results and invents nothing."""
+    text = " ".join([log.title, log.intro] + log.paragraphs + log.limitations)
+    missing = unsupported_numbers(text, evidence)
+    cites_results = any("." in t for t in _NUMBER.findall(text)
+                        if not unsupported_numbers(t, evidence))
+    problems = []
+    if missing:
+        problems.append("These numbers appear nowhere in the results: " + ", ".join(missing) + ".")
+    if not cites_results:
+        problems.append("State the result's statistics from the results: the Silverman p-value, "
+                        "the valley location and its 95% interval.")
+    return problems
+
+
+def check_log(ctx: RunContext[CrewDeps], log: CaptainsLog) -> CaptainsLog:
+    """Enforced in code: the report states result numbers and invents none."""
+    problems = log_problems(log, ctx.deps.evidence)
+    if problems:
+        ctx.deps.recorder.log(MissionEvent.Station.LOG, MissionEvent.Kind.NOTE,
+                              "Report returned: statistics missing or not from results",
+                              rationale=" ".join(problems), payload=log.model_dump())
+        raise ModelRetry("Revise the report. " + " ".join(problems))
+    return log
+
+
 def check_plan_hazards(ctx: RunContext[CrewDeps], plan: AnalysisPlan) -> AnalysisPlan:
     """Enforced in code: a plan that leaves a hazard unanswered goes back to the model."""
     problems = hazard_problems(plan, ctx.deps.hazards)
@@ -278,11 +324,13 @@ def build_crew(capabilities=()):
     tactical = _agent("tactical", Review, TACTICAL, tools=[count_population],
                       capabilities=capabilities, retries=4)
     tactical.output_validator(check_review_numbers)
+    captains_log = _agent("captains_log", CaptainsLog, LOG, capabilities=capabilities, retries=4)
+    captains_log.output_validator(check_log)
     return {
         "ops": _agent("ops", OpsBrief, OPS, capabilities=capabilities),
         "science": science_officer,
         "tactical": tactical,
-        "log": _agent("captains_log", CaptainsLog, LOG, capabilities=capabilities),
+        "log": captains_log,
     }
 
 

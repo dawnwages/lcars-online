@@ -35,9 +35,11 @@ class Alternative(BaseModel):
 
 class HazardResponse(BaseModel):
     hazard_id: str = Field(description="The hazard's ID from the checklist, e.g. 'H1'")
-    response: Literal["filter", "accept_risk"] = Field(
-        description="'filter': a population filter handles it. 'accept_risk': it can't or "
-                    "needn't be handled; explain why")
+    response: Literal["filter", "accept_risk", "not_applicable"] = Field(
+        description="'filter': a population filter handles it. 'accept_risk': it affects this "
+                    "analysis but can't be fully handled; explain the risk. 'not_applicable': it "
+                    "doesn't affect this analysis (e.g. it concerns a column the method doesn't "
+                    "use); explain why")
     filter_number: int | None = Field(
         default=None, description="For 'filter': which population filter handles it (1 = first)")
     explanation: str = Field(description="How this response deals with the hazard")
