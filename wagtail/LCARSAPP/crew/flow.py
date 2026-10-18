@@ -260,7 +260,9 @@ def away_mission(mission_id: int, gate_policies: dict | None = None):
                         + review.model_dump_json())
 
         # Captain's Log: draft, then a person publishes. Its numbers must come from results.
-        deps.evidence = [json.dumps(results, default=str), plan.model_dump_json()]
+        # The review's numbers were checked against results and the reviewer's own counts
+        deps.evidence = [json.dumps(results, default=str), plan.model_dump_json(),
+                         review.model_dump_json()]
         rec.set_status(Mission.Status.RUNNING, plan=plan.model_dump(), result=results,
                        review=review.model_dump())
         log = run_station(crew["log"], S.LOG, (

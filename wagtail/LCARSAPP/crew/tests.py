@@ -164,3 +164,45 @@ class ReviewNumberTests(SimpleTestCase):
         from crew.agents import unsupported_numbers
         self.assertEqual(unsupported_numbers("Significant at cuts down to 20 percent error",
                                              ["{'radius_rel_err_lt': 0.2}"]), [])
+
+
+
+class NumberCheckFormatTests(SimpleTestCase):
+    """How people write numbers in reports, decided up front rather than one mission at a time.
+
+    Regressions: mission 14's Log wrote "1,938" (split into "1" and "938"), and a percent
+    leniency made the check accept invented numbers like p = 0.07 and "97%".
+    """
+
+    EVIDENCE = ["{'n': 1938, 'p_value': 0.004, 'radius_earth': 1.75, 'ci95': [1.659, 1.818], "
+                "'depth_ratio': 0.719, 'final_n': 1918, 'n_planets': 6451, 'cut': 0.15, 'p8': 0.06}"]
+
+    SUPPORTED = {
+        "thousands separator": "We analyzed 1,938 planets (1,918 by transit) of 6,451.",
+        "range with hyphen": "The 95% interval is 1.66-1.82 Earth radii.",
+        "range with en dash": "The 95% interval is 1.66\u20131.82 Earth radii.",
+        "range with to": "from 1.659 to 1.818",
+        "approximately": "a valley at ~1.75 and p\u22480.004",
+        "inequality": "p<0.05 is the threshold and p = 0.004",
+        "percent of a fraction": "radius error under 15% (15 percent)",
+        "rounded": "valley at 1.8 Earth radii, depth 0.72",
+        "small counts": "significant at four of six cuts, 2 issues",
+    }
+    INVENTED = {
+        "a p-value nothing computed": ("p = 0.07", ["0.07"]),
+        "a count nothing produced": ("113 long-period planets", ["113"]),
+        "a percentage of nothing": ("97% transit-dominated", ["97%"]),
+        "a wrong count with separator": ("4,785 transit planets", ["4,785"]),
+    }
+
+    def test_supported_formats_pass(self):
+        from crew.agents import unsupported_numbers
+        for name, text in self.SUPPORTED.items():
+            with self.subTest(name):
+                self.assertEqual(unsupported_numbers(text, self.EVIDENCE + ["0.05"]), [])
+
+    def test_invented_numbers_are_caught(self):
+        from crew.agents import unsupported_numbers
+        for name, (text, expected) in self.INVENTED.items():
+            with self.subTest(name):
+                self.assertEqual(unsupported_numbers(text, self.EVIDENCE), expected)

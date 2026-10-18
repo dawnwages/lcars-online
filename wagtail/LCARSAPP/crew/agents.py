@@ -250,40 +250,41 @@ first person plural ("we")."""
 
 # Conventions, not results: confidence levels ("95% CI")
 CONVENTIONAL = {"90%", "95%", "99%"}
-_NUMBER = re.compile(r"(?<![\w.])-?\d+(?:\.\d+)?%?")
+# A number as people write it: 1,938 / 0.004 / 1.75 / 15% (no sign: a hyphen in "1.66-1.82"
+# is a range, not a minus)
+_NUMBER = re.compile(r"(?<![\w.,])\d{1,3}(?:,\d{3})+(?:\.\d+)?%?|(?<![\w.,])\d+(?:\.\d+)?%?")
+
+
+def _parse(token):
+    raw = token.rstrip("%").replace(",", "")
+    places = len(raw.split(".")[1]) if "." in raw else 0
+    return float(raw), places, token.endswith("%")
 
 
 def _values(text):
-    out = set()
-    for token in _NUMBER.findall(text):
-        try:
-            out.add(float(token.rstrip("%")))
-        except ValueError:
-            pass
-    return out
+    return {_parse(t)[0] for t in _NUMBER.findall(text)}
 
 
 def unsupported_numbers(text, evidence):
-    """Numbers in `text` (decimals, and integers of 10 or more) that appear nowhere in evidence.
+    """Numbers in `text` that nothing in `evidence` supports, at the precision written.
 
-    Matches at the precision the claim is written with, so '0.018' matches 0.0180 and
-    '1.72' matches 1.719. Percentages must appear as written or as a fraction.
+    Checked: decimals, percentages, and integers of 10 or more (small counts and list
+    positions are skipped). A claim is supported if some evidence value rounds to it
+    ("1.75" for 1.749, "1,938" for 1938), or, read as a percentage, some fraction does
+    ("15%" or "15" for 0.15). Conventional levels like "95% CI" are allowed.
     """
     known = _values(" ".join(evidence))
     missing = []
     for token in _NUMBER.findall(text):
         if token in CONVENTIONAL:
             continue
-        is_pct = token.endswith("%")
-        raw = token.rstrip("%")
-        value = float(raw)
-        if "." not in raw and abs(value) < 10 and not is_pct:
-            continue  # small counts and list positions
-        places = len(raw.split(".")[1]) if "." in raw else 0
-        # A percentage may be written with or without '%' ("20" for a 0.2 cut)
-        candidates = {value, value / 100}
-        if not any(round(k, places) == round(c, places) or abs(k - c) <= 10 ** -places / 2
-                   for k in known for c in candidates):
+        value, places, is_pct = _parse(token)
+        if "." not in token and value < 10 and not is_pct:
+            continue
+        tolerance = 0.5 * 10 ** -places  # how much rounding the written precision allows
+        supported = any(abs(k - value) <= tolerance + 1e-12 or abs(k * 100 - value) <= tolerance + 1e-9
+                        for k in known)
+        if not supported:
             missing.append(token)
     return sorted(set(missing))
 
