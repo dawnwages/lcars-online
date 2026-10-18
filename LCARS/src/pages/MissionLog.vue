@@ -32,6 +32,7 @@
           <span v-if="detail.duration_s"><b>Duration</b> {{ formatDuration(detail.duration_s) }}</span>
         </div>
         <div class="verdict" v-if="detail.verdict">{{ detail.verdict }}</div>
+        <AnalysisCaveats />
         <div class="waiting" v-if="pendingGates.length">
           ◆ Awaiting captain: {{ pendingGates.map(g => g.label).join(', ') }}
         </div>
@@ -78,6 +79,7 @@
 import MissionService from '../services/MissionService'
 import GatePanel from '../common/GatePanel.vue'
 import LaunchPanel from '../common/LaunchPanel.vue'
+import AnalysisCaveats from '../common/AnalysisCaveats.vue'
 import { sounds } from '../assets/sounds'
 
 const LIVE = ['running', 'awaiting_approval', 'planned']
@@ -85,7 +87,7 @@ const GATE_ORDER = ['data_card', 'plan', 'plan_revision', 'publish']
 
 export default {
   name: 'mission-log',
-  components: { GatePanel, LaunchPanel },
+  components: { GatePanel, LaunchPanel, AnalysisCaveats },
   emits: ['pending-gates'],
   data() {
     return {
