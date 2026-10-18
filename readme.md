@@ -172,6 +172,38 @@ Set in the environment or in `wagtail/LCARSAPP/.env.local` (loaded automatically
 | `CREW_TEMPERATURE` | `0.2` | Sampling temperature |
 | `PREFECT_API_URL` | `http://127.0.0.1:4200/api` (set by `start.sh`) | Prefect server for schedules and run history |
 
+## When missions fail
+
+A **failed** mission is one that didn't reach a Captain's Log you could publish. It doesn't mean the analysis found no valley: often Engineering has already computed correct statistics, and they remain in the mission log. The crew is built to **fail closed**: when something can't be done within the rules, it stops rather than letting unchecked output through.
+
+| Kind | What happened | Verdict shown |
+|---|---|---|
+| **Invalid output within limits** | An agent kept being sent back by a check (unanswered hazard, invalid filter, invented number, missing statistics) or used up its budget of requests, tool calls, response length, or time | "The crew could not produce valid output within its limits…" |
+| **No valid plan** | Engineering refused the plan (an invalid filter or fewer than 200 planets) and no valid revision followed | "No valid plan: …" |
+| **Infrastructure** | The model server didn't load, the machine slept, or the mission process stopped | "Model … did not come online" or "Interrupted: …" |
+| **Rejected** (separate status) | A person said no at a gate: a decision, not a failure | Status **Rejected** |
+
+Some problems don't fail the mission; the report says so instead:
+
+- **The reviewer can't produce a valid review.** The report uses the result and states it was not independently challenged.
+- **A requested revision can't be produced, or Engineering refuses it.** The report uses the approved plan's result and lists the reviewer's issues as unresolved.
+
+**Reading a failure.** The mission's verdict says which kind it was. In its event log, red **Error** entries show where it stopped, and **Plan returned**, **Review returned**, and **Report returned** notes show what each check objected to, with the model's last output attached.
+
+**Failures that shaped the guardrails.** Each of these happened in a real mission and led to a fix:
+
+| What failed | Fix |
+|---|---|
+| A tool returned 0 planets for a filter with no value, and the planner spent 34 minutes debugging it | Tools refuse malformed filters with the reason and the valid values |
+| The planner ignored the hazards Ops raised, every time | Every hazard must be answered, checked in code |
+| The planner filtered on mass to answer a hazard about masses, though the method uses radius only; n fell from 3,352 to 621 and the report said "No Evidence for a Gap" | A `not_applicable` response, and a rule against filtering on columns the method never uses |
+| The reviewer cited p-values and percentages nothing had computed | Reviews and reports may cite only numbers from results, the data card, or counts they ran |
+| The reviewer read a passing negative control as a failure | Engineering states each result's meaning in code |
+| Constrained tool calls left out an optional filter value even when the model's text named it | The value is a required field |
+| Text filters like `transit` (the code is `tran`) matched nothing | Values that never occur are refused, listing the real ones |
+
+Known limit: the number check catches invented numbers, not a real number attributed to the wrong analysis. Read the event log, not just the report.
+
 ## Troubleshooting
 
 - **"Authorization required" on the bridge.** Log in at http://localhost:8000/admin first, then return to the bridge tab.
