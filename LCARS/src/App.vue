@@ -11,8 +11,8 @@
         <LCARSBar align="left" :color-scheme="titleType">{{title}}</LCARSBar>
       </div>
       <div class="lcars-title large" :data-type="titleType">
-        <span class="short-title">{{ chartOrPostType === 'missions' ? 'Mission Ops' : title }}</span>
-        <span class="long-title">{{ chartOrPostType === 'missions' ? 'Mission Operations' : longTitle }}</span>
+        <span class="short-title">{{ viewTitle.short || title }}</span>
+        <span class="long-title">{{ viewTitle.long || longTitle }}</span>
       </div>
       <div class="sidebar-top">
         <div class="sidebar-block" v-on:click="enterFullscreen">{{displayLcarsLabel ? lcarsLabel : numbers[0]}}</div>
@@ -29,7 +29,12 @@
           <br/>
           {{ pendingGates ? `${pendingGates} awaiting captain` : numbers[2] }}
         </div>
-        <div class="sidebar-block bgcolor-2">{{numbers[3]}}</div>
+        <div class="sidebar-block nav-block bgcolor-2" :class="{ active: chartOrPostType === 'briefing' }"
+             @click="showBriefing">
+          Briefing
+          <br/>
+          {{numbers[3]}}
+        </div>
         <div class="sidebar-block bgcolor-6">{{numbers[4]}}</div>
         <div class="sidebar-block bgcolor-3">{{numbers[5]}}</div>
       </div>
@@ -50,10 +55,11 @@
           <LCARSButton :blank="true" />
         </div>
       </div>
-      <div class="main-content" :class="{ 'fills-screen': chartOrPostType === 'missions' }">
+      <div class="main-content" :class="{ 'fills-screen': ['missions', 'briefing'].includes(chartOrPostType) }">
         <StarChart :type="starChartType" v-if="chartOrPostType === 'chart'"/>
         <CoreList v-if="chartOrPostType === 'post'"/>
         <MissionLog v-if="chartOrPostType === 'missions'" @pending-gates="n => pendingGates = n"/>
+        <Briefing v-if="chartOrPostType === 'briefing'"/>
       </div>
       <AnalysisCaveats v-if="chartOrPostType === 'missions'" />
       <footer>
@@ -74,6 +80,7 @@ import StarChart from './pages/StarChart.vue'
 import CoreList from './pages/CoreList.vue'
 import MissionLog from './pages/MissionLog.vue'
 import AnalysisCaveats from './common/AnalysisCaveats.vue'
+import Briefing from './pages/Briefing.vue'
 import { makeRandomLetters, makeRandomNumber, pickRandom } from './utils'
 import { initSounds, sounds } from './assets/sounds'
 
@@ -179,6 +186,12 @@ export default {
     }
   },
   computed: {
+    viewTitle() {
+      return {
+        missions: { short: 'Mission Ops', long: 'Mission Operations' },
+        briefing: { short: 'Briefing', long: 'Mission Briefing' },
+      }[this.chartOrPostType] || {}
+    },
     displayLcarsLabel() {
       if (Math.random() > 0.35) {
         return true
@@ -195,7 +208,8 @@ export default {
     StarChart,
     CoreList,
     MissionLog,
-    AnalysisCaveats
+    AnalysisCaveats,
+    Briefing
   },
   methods: {
     incrementNumberSequence() {
@@ -203,6 +217,10 @@ export default {
     },
     togglePostView(event){
       this.chartOrPostType = this.chartOrPostType === 'post' ? 'chart' : 'post'
+    },
+    showBriefing() {
+      this.chartOrPostType = this.chartOrPostType === 'briefing' ? 'chart' : 'briefing'
+      sounds.panelBeep03?.play()
     },
     showMissions() {
       this.chartOrPostType = this.chartOrPostType === 'missions' ? 'chart' : 'missions'
