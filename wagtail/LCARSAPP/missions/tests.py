@@ -329,3 +329,28 @@ class BreakdownToolTests(TransactionTestCase):
         self.assertIn(str(by_method["counts"]["tran"]), " ".join(deps.evidence))
         bad = agents.breakdown_population(ctx, window, "nope")
         self.assertIn("Unknown column", bad["error"])
+
+
+class InterpretationTests(TransactionTestCase):
+    """Regression for mission 11: Tactical read a passing negative control (p = 0.15) as a
+    failure. Engineering now states what each result means, in code."""
+
+    def test_engineering_states_what_the_results_mean(self):
+        from crew import science
+        from crew.flow import _result_json, engineering
+        from crew.schemas import AnalysisPlan
+        df, _ = science.load_snapshot()
+        plan = AnalysisPlan(
+            hypothesis="Two populations", null_hypothesis="One population",
+            population=[{"column": "disc_method", "op": "eq", "value": "tran", "reason": "x"},
+                        {"column": "rade_rel_err", "op": "lt", "value": 0.10, "reason": "x"}],
+            bandwidth_dex=0.04, significance_level=0.05, falsification="p >= 0.05",
+            alternatives_considered=[{"option": "all", "why_not": "x"}], risks=["x"],
+            hazard_responses=[{"hazard_id": "H1", "response": "filter", "filter_number": 1,
+                               "explanation": "transit only"}])
+        rec = MissionRecorder(Mission.objects.create(question="Gap?"))
+        engineering(rec, df, plan, seed=1, negative_control=False)
+        meaning = _result_json(rec)["interpret_results"]
+        self.assertIn("significant, evidence of more than one mode", meaning["primary_test"])
+        self.assertIn("PASSED, no valley found in single-peak synthetic data", meaning["negative_control"])
+        self.assertIn("precision cuts", meaning["specification_curve"])

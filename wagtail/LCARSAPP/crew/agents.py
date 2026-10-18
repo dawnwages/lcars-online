@@ -234,7 +234,9 @@ believe the result. Check for: selection bias from discovery method, circular us
 inferred values, choosing filters after seeing results (p-hacking), low power, measurement
 error, and whether the conclusion holds across the whole precision-cut sweep or only at one
 setting. To check a result across groups, use breakdown_population once (e.g. by disc_method
-or pl_orbper) rather than one count per group. The negative control must find no valley; if it does, the method is broken.
+or pl_orbper) rather than one count per group. Engineering's interpret_results states, in
+code, whether each test is significant and whether the negative control passed; don't
+reinterpret those numbers. Critique the analysis's assumptions and choices instead. The negative control must find no valley; if it does, the method is broken.
 Accept only if the conclusion survives. Ask for revision if a fixable flaw remains."""
 
 LOG = """You write the Captain's Log: a short public report of the mission for data

@@ -60,6 +60,46 @@ def engineering(rec, df, plan, seed, negative_control):
             null = 10 ** science.synthetic_null(np.log10(inside), seed=seed)
             c = science.analyze_radius_distribution(null, bandwidths=bandwidths, n_boot=300, seed=seed)
             box["result"] = {"silverman": c.silverman, "valley": c.valley}
+    interpret(rec, plan, negative_control)
+
+
+def interpret(rec, plan, negative_control):
+    """State what the numbers mean, in code, so no agent has to (or can) reinterpret them."""
+    results = _result_json(rec)
+    alpha = plan.significance_level
+    a = results.get("analyze_radius_distribution") or {}
+    p = (a.get("silverman") or {}).get("p_value")
+    valley = (a.get("valley") or {}).get("radius_earth")
+    ci = (a.get("valley_bootstrap") or {}).get("ci95_radius_earth")
+    significant = p is not None and p < alpha
+    out = {"alpha": alpha, "n": a.get("n")}
+    if negative_control:
+        out["this_mission"] = ("NEGATIVE CONTROL: the radii were replaced with a single-peak synthetic "
+                               "sample, so a correct method finds no valley")
+        out["primary_test"] = (f"Silverman p = {p} {'<' if significant else '>='} alpha {alpha}: "
+                               + ("FAILED, a valley was found in data that has none"
+                                  if significant else "PASSED, no valley found, as expected"))
+    else:
+        out["primary_test"] = (f"Silverman p = {p} {'<' if significant else '>='} alpha {alpha}: "
+                               + ("significant, evidence of more than one mode (a valley)"
+                                  if significant else "not significant at this sample size"))
+        if valley:
+            out["valley"] = f"valley at {valley} Earth radii, 95% interval {ci}"
+        nc = ((results.get("negative_control") or {}).get("silverman") or {}).get("p_value")
+        if nc is not None:
+            out["negative_control"] = (
+                f"p = {nc} {'>=' if nc >= alpha else '<'} alpha {alpha}: "
+                + ("PASSED, no valley found in single-peak synthetic data, as expected"
+                   if nc >= alpha else "FAILED, the method found a valley in data that has none"))
+    rows = [r for r in results.get("specification_curve") or [] if "p_value" in r]
+    if rows:
+        locs = [r["valley_radius_earth"] for r in rows if r.get("valley_radius_earth")]
+        sig = [r for r in rows if r["p_value"] < alpha]
+        out["specification_curve"] = (
+            f"significant at {len(sig)} of {len(rows)} precision cuts"
+            + (f"; valley location {min(locs)} to {max(locs)} Earth radii" if locs else ""))
+    with rec.tool(S.ENGINEERING, "interpret_results", {"alpha": alpha}) as box:
+        box["result"] = out
 
 
 def _result_json(rec):
@@ -131,12 +171,29 @@ def away_mission(mission_id: int, gate_policies: dict | None = None):
                          policy=gate_policies.get(Gate.Name.DATA_CARD))
 
         feedback = ""
+        unresolved = ""
+        completed = None  # (plan, results, review) of the last analysis that ran
         for attempt in range(MAX_REVISIONS + 1):
-            # Science Officer: pre-register the plan
-            plan = run_station(crew["science"], S.SCIENCE, (
-                f"Question: {mission.question}\n\nOps brief:\n{brief.summary}\n\n"
-                f"{planning_facts(card)}\n\n{hazard_checklist(deps.hazards)}\n\n"
-                f"Columns: {card['columns']}\n{feedback}"), deps)
+            if attempt > 0 and completed:
+                # A revision improves an approved result; if it can't be produced, keep that result
+                try:
+                    plan = run_station(crew["science"], S.SCIENCE, (
+                        f"Question: {mission.question}\n\nOps brief:\n{brief.summary}\n\n"
+                        f"{planning_facts(card)}\n\n{hazard_checklist(deps.hazards)}\n\n"
+                        f"Columns: {card['columns']}\n{feedback}"), deps)
+                except AgentRunError as exc:
+                    plan, results, review = completed
+                    unresolved = (f"The reviewer asked for a revision, but the Science Officer could "
+                                  f"not produce one within its limits ({exc}). The report uses the "
+                                  "approved plan's result; the reviewer's issues are unresolved.")
+                    rec.log(S.SYSTEM, K.DECISION, "Revision not produced; keeping approved result",
+                            rationale=unresolved)
+                    break
+            else:
+                plan = run_station(crew["science"], S.SCIENCE, (
+                    f"Question: {mission.question}\n\nOps brief:\n{brief.summary}\n\n"
+                    f"{planning_facts(card)}\n\n{hazard_checklist(deps.hazards)}\n\n"
+                    f"Columns: {card['columns']}\n{feedback}"), deps)
             rec.log(S.SCIENCE, K.DECISION, f"Analysis plan (attempt {attempt + 1})",
                     rationale=plan.hypothesis,
                     alternatives=[a.model_dump() for a in plan.alternatives_considered],
@@ -154,6 +211,13 @@ def away_mission(mission_id: int, gate_policies: dict | None = None):
                 rec.log(S.ENGINEERING, K.DECISION, "Plan refused: " + (
                     "sample too small" if isinstance(exc, science.InsufficientSample)
                     else "invalid filter"), rationale=str(exc))
+                if completed:
+                    plan, results, review = completed
+                    unresolved = (f"Engineering refused the revised plan ({exc}). The report uses "
+                                  "the approved plan's result; the reviewer's issues are unresolved.")
+                    rec.log(S.SYSTEM, K.DECISION, "Revision refused; keeping approved result",
+                            rationale=unresolved)
+                    break
                 if attempt == MAX_REVISIONS:
                     raise
                 feedback = (f"Engineering refused the previous plan: {exc}. "
@@ -175,6 +239,7 @@ def away_mission(mission_id: int, gate_policies: dict | None = None):
             rec.log(S.TACTICAL, K.DECISION, f"Verdict: {review.verdict}",
                     rationale=review.summary, payload=review.model_dump())
             rec.set_status(Mission.Status.RUNNING, review=review.model_dump())
+            completed = (plan, results, review)
             if review.verdict != "revise":
                 break
             feedback = ("Tactical asked for a revision of the previous plan:\n"
@@ -182,9 +247,12 @@ def away_mission(mission_id: int, gate_policies: dict | None = None):
 
         # Captain's Log: draft, then a person publishes. Its numbers must come from results.
         deps.evidence = [json.dumps(results, default=str), plan.model_dump_json()]
+        rec.set_status(Mission.Status.RUNNING, plan=plan.model_dump(), result=results,
+                       review=review.model_dump())
         log = run_station(crew["log"], S.LOG, (
             f"Question: {mission.question}\nPlan:\n{plan.model_dump_json()}\n"
-            f"Results:\n{json.dumps(results, default=str)}\nReview:\n{review.model_dump_json()}"),
+            f"Results:\n{json.dumps(results, default=str)}\nReview:\n{review.model_dump_json()}"
+            + (f"\nRevision note: {unresolved}" if unresolved else "")),
             deps)
         page = _create_draft_report(rec, log)
         rec.set_status(Mission.Status.RUNNING, report_page=page, verdict=log.intro[:200])
