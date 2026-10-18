@@ -51,11 +51,78 @@ scripts/start.sh
 
 Stop everything with `scripts/stop.sh`.
 
-## The mission: seek out new worlds
+## The analysis: is there a gap in the sizes of small planets?
 
-The data is NASA's [Exoplanet Archive](https://exoplanetarchive.ipac.caltech.edu/) (`pscomppars` table): about 6,400 confirmed planets with their orbit, size, mass, temperature, distance, and discovery method. A Prefect flow fetches it daily; the archive itself updates weekly, usually on Thursdays. A pinned snapshot from 2026-10-07 is kept in the repo, so everything also works offline.
+### The science
 
-The question the crew investigates: **is there a gap in the sizes of small planets?** This is the *radius valley* (Fulton et al. 2017), a known result: planets around 1.5–2.0 Earth radii are rare. Because the answer is known, it's a fair test of whether the crew does the analysis well.
+Planets between Earth's size and about four times Earth's size fall into two groups: **super-Earths** near 1.3 Earth radii (rocky, with little atmosphere) and **sub-Neptunes** near 2.4 Earth radii (rocky cores inside thick gas envelopes). Planets in between, about 1.5–2.0 Earth radii, are rare. This **radius valley** was first measured clearly by Fulton et al. (2017), *The California-Kepler Survey. III*. The leading explanation is that starlight, or heat from the planet's own core, strips the atmosphere from smaller planets close to their stars.
+
+Because the answer is known, the question is a fair test of whether the crew does the analysis well. The project tests a process; it doesn't make a discovery.
+
+### The data
+
+NASA's [Exoplanet Archive](https://exoplanetarchive.ipac.caltech.edu/), table `pscomppars`: one row per confirmed planet, with the best available value for each of 20 columns, including radius and its error, mass and how it was obtained, orbital period, discovery method, and host-star properties. There were 6,375 planets on 2026-10-07 and 6,451 on 2026-10-17.
+
+- **Freshness.** A Prefect flow fetches the archive daily, validates it, and saves a snapshot with its SHA-256 hash and a record of which planets were added, removed, or revised. The archive itself updates weekly, usually on Thursdays.
+- **Reproducibility.** Each mission records the snapshot it analyzed. The 2026-10-07 snapshot is pinned in the repo (`crew/data/`) and is the ground truth for the tests.
+- **Facts any analysis must handle** (the data card Ops reviews):
+  - **Discovery method shapes the catalog.** About 74% of planets were found by transit, which favors short orbits (median 8 days); radial-velocity planets have a median orbit of 305 days.
+  - **About 47% of masses are inferred** from a mass–radius relation, not measured. This method uses radius only.
+  - **Radius precision varies widely.** The median relative error is about 8%.
+
+### The method
+
+Every number below is computed by deterministic code in [`crew/science.py`](wagtail/LCARSAPP/crew/science.py). The Science Officer chooses the population, bandwidth, and significance level, and you approve that plan before anything runs.
+
+1. **Population.** Apply the approved filters in order (for example, transit-discovered planets with radius error under 15%), then keep planets between 1 and 4 Earth radii. Plans that leave fewer than 200 planets are refused.
+2. **Size distribution.** A Gaussian kernel density estimate of log₁₀(radius) on 400 points across the window, at the plan's bandwidth (0.02–0.08 dex), and also at 0.03 and 0.05 dex for comparison.
+3. **Silverman's test for multimodality** (Silverman 1981).
+   - **Null hypothesis:** the distribution has at most one mode.
+   - **Critical bandwidth:** find h_crit, the smallest bandwidth at which the estimate has one mode, by bisection.
+   - **p-value:** draw 500 smoothed bootstrap samples at h_crit with Silverman's variance correction; p is the share of them that still have more than one mode.
+   - **Reading it:** a small p is evidence of a valley. The test is conservative.
+4. **Valley location.** The lowest point between the two highest peaks, its depth relative to those peaks, and a 95% percentile interval for its location from 500 bootstrap resamples. The run also reports how often a valley appears at all.
+5. **Specification curve.** This always runs, whatever the plan says. The analysis is repeated with no precision cut and with radius error under 20%, 15%, 10%, 8%, and 5%. A conclusion has to hold across the sweep, not just at one cut chosen after seeing the results.
+6. **Negative control.** The radii are replaced with a log-normal sample of the same size, mean, and spread, which has one peak by construction, and the test is rerun. It should find nothing. In a *negative-control mission*, this synthetic sample is the whole analysis.
+7. **Interpretation, in code.** Engineering states whether the main test is significant at the plan's alpha, whether the negative control **PASSED** or **FAILED**, and how many precision cuts agree. Agents critique these statements; they don't recompute them.
+
+### Reading the results
+
+| You see | It means |
+|---|---|
+| p below alpha, valley at 1.5–2.1 Earth radii, tight interval, holds across the sweep, negative control passes | Evidence for two groups of planet sizes, consistent with the published valley |
+| A valley is visible, but p is at or above alpha | **Not** evidence of no valley. Usually there are too few planets for the test: report "not significant at this sample size" |
+| Significant at one precision cut but not at its neighbors | Fragile. Picking that cut after seeing the results would be p-hacking |
+| Significant only when all discovery methods are mixed | Suspect. Mixed selection effects can create or hide structure |
+| The negative control finds a valley | The method is broken; trust nothing from that mission |
+| Plan refused | An invalid filter or too few planets; Engineering won't run a test that can't mean anything |
+
+### What the data shows
+
+These figures come from this code, run on the pinned 2026-10-07 snapshot, transit-discovered planets only:
+
+| Radius error cut | Planets in window | Silverman p | Valley (Earth radii) | 95% interval |
+|---|---|---|---|---|
+| none | 3,291 | 0.017 | 1.73 | 1.66–1.83 |
+| < 15% | 1,858 | 0.010 | 1.74 | 1.61–1.81 |
+| < 10% | 1,421 | < 0.003 | 1.75 | 1.66–1.82 |
+| < 5% | 575 | 0.18 | 1.74 | 1.35–1.83 |
+
+- **Location:** the valley sits at 1.72–1.76 Earth radii at every cut.
+- **Significance:** it's significant wherever enough planets remain, and not at the strictest cut, which shows the trade-off between precision and statistical power.
+- **Negative control:** it finds nothing (p ≈ 0.5).
+- **On current data:** missions on the 2026-10-17 data with a 15% cut found the same picture: 1,938 planets, p = 0.004, valley at 1.75 Earth radii (95% interval 1.66–1.82), negative control passed.
+
+### Limits an expert would raise
+
+- **No completeness correction.** The crew counts planets in the catalog, not the true population. Fulton et al. corrected for which planets a survey could detect; this analysis does not.
+- **Selection effects.** Transit dominates the sample, so a valley can partly reflect what surveys are able to detect.
+- **A composite catalog.** Values come from many studies and pipelines.
+- **A conservative test.** Silverman's test can miss shallow valleys, and the result depends on sample size and precision.
+- **A known answer.** Rediscovering a published result tests the process; it is not a discovery.
+- **A small local model.** The numbers are computed and checked by code, but a 9-billion-parameter model can still misread or misattribute results in its prose. Read the mission's event log, not just its report.
+
+The bridge's **Briefing** screen and the **disclaimer** bar on the Missions screen present the same material.
 
 ## The crew
 
