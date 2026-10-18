@@ -157,3 +157,10 @@ class ReviewNumberTests(SimpleTestCase):
         self.assertEqual(unsupported_numbers(
             "n=3639 with p=0.018; valley 1.72; 113 long-period planets; 2 issues; 1.8% of n", 
             self.EVIDENCE + ["0.018"]), [])
+
+
+    def test_percent_written_without_sign_matches_a_fraction(self):
+        # Regression: mission 13's reviewer cited the 20% precision cut as "20"; results store 0.2
+        from crew.agents import unsupported_numbers
+        self.assertEqual(unsupported_numbers("Significant at cuts down to 20 percent error",
+                                             ["{'radius_rel_err_lt': 0.2}"]), [])

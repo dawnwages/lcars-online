@@ -280,7 +280,8 @@ def unsupported_numbers(text, evidence):
         if "." not in raw and abs(value) < 10 and not is_pct:
             continue  # small counts and list positions
         places = len(raw.split(".")[1]) if "." in raw else 0
-        candidates = {value, value / 100} if is_pct else {value}
+        # A percentage may be written with or without '%' ("20" for a 0.2 cut)
+        candidates = {value, value / 100}
         if not any(round(k, places) == round(c, places) or abs(k - c) <= 10 ** -places / 2
                    for k in known for c in candidates):
             missing.append(token)

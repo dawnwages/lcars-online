@@ -15,6 +15,7 @@ from pydantic_ai.durable_exec.prefect import PrefectDurability
 from pydantic_ai.exceptions import AgentRunError
 
 from crew import science
+from crew.schemas import Review
 from crew.agents import (MODEL_NAME, CrewDeps, build_crew, hazard_checklist, number_hazards,
                          planning_facts, run_station)
 from missions.models import Gate, Mission, MissionEvent, Snapshot
@@ -229,10 +230,23 @@ def away_mission(mission_id: int, gate_policies: dict | None = None):
             # Tactical: try to break it, citing only numbers it was given or counted
             deps.evidence = [json.dumps(results, default=str), json.dumps(card, default=str),
                              plan.model_dump_json()]
-            review = run_station(crew["tactical"], S.TACTICAL, (
-                f"Question: {mission.question}\n{planning_facts(card)}\n"
-                f"Plan:\n{plan.model_dump_json()}\n"
-                f"Results:\n{json.dumps(results, default=str)}"), deps)
+            try:
+                review = run_station(crew["tactical"], S.TACTICAL, (
+                    f"Question: {mission.question}\n{planning_facts(card)}\n"
+                    f"Plan:\n{plan.model_dump_json()}\n"
+                    f"Results:\n{json.dumps(results, default=str)}"), deps)
+            except AgentRunError as exc:
+                # No valid review: keep the result, and say plainly that it went unreviewed
+                review = Review(verdict="accept", issues=[], confidence="low",
+                                summary="No adversarial review was completed: the reviewer could not "
+                                        f"produce a review that passed its checks ({exc}).")
+                unresolved = ("The adversarial reviewer could not complete a valid review, so this "
+                              "result has not been independently challenged.")
+                rec.log(S.SYSTEM, K.DECISION, "Review not completed; result is unreviewed",
+                        rationale=unresolved)
+                rec.set_status(Mission.Status.RUNNING, review=review.model_dump())
+                completed = (plan, results, review)
+                break
             for issue in review.issues:
                 rec.log(S.TACTICAL, K.DECISION, f"{issue.severity} {issue.category}",
                         rationale=issue.detail)
