@@ -23,7 +23,7 @@
             <div v-else-if="block.type == 'image'">
                 <CoreImage :src="url+block.value.large.src"/>
             </div>
-            <div v-else-if="block.type == 'paragraph'">
+            <div v-else-if="block.type == 'paragraph'" class="post-body">
                 <p v-html="block.value"></p>
             </div>
         </span>
@@ -166,6 +166,22 @@ export default {
 .white {
   color: white;
 }
+
+/* Post paragraphs in a readable text face; headings keep the LCARS display font */
+.post-body {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, Roboto,
+    "Helvetica Neue", Arial, sans-serif;
+  text-transform: none;
+  font-size: 17px;
+  line-height: 1.6;
+  letter-spacing: normal;
+  color: #e8e8e8;
+  max-width: 70ch;
+}
+.post-body p { margin: 0 0 0.9em; }
+.post-body a { color: var(--lcars-color-b6); }
+.post-body b, .post-body strong { color: #fff; }
+.post-body code { font-family: ui-monospace, Menlo, monospace; font-size: 0.9em; }
 
 .background-star,
 .labeled-star {
