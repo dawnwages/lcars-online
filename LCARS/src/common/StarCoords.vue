@@ -30,6 +30,7 @@ export default {
   },
   mounted() {
     this.timer = window.setInterval(() => {
+      if (document.documentElement.classList.contains('lcars-paused')) return
       this.coord1 = makeRandomNumber(6, true)
       this.coord2 = makeRandomNumber(6, true)
     }, UPDATE_INTERVAL)

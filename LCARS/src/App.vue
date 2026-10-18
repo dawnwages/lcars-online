@@ -2,6 +2,8 @@
     Unfortunately this means that breakpoints need to manually account for
     CSS padding -->
 <template>
+  <!-- No Vue class binding here: the ResizeObserver in index.js adds the XS/SM/MD/... layout
+       classes directly, and a binding would overwrite them on re-render -->
   <div class="screen"
     data-observe-resizes
     data-breakpoints='{"XS": 0, "SM": 708, "MD": 1280, "LG": 1600, "XL": 1900, "XXL": 3000}'
@@ -35,7 +37,12 @@
           <br/>
           {{numbers[3]}}
         </div>
-        <div class="sidebar-block bgcolor-6">{{numbers[4]}}</div>
+        <div class="sidebar-block nav-block bgcolor-6" :class="{ active: focus }" @click="toggleFocus"
+             :title="focus ? 'Resume animation and show the top panel' : 'Pause animation and collapse the top panel'">
+          {{ focus ? 'Full display' : 'Focus mode' }}
+          <br/>
+          {{numbers[4]}}
+        </div>
         <div class="sidebar-block bgcolor-3">{{numbers[5]}}</div>
       </div>
       <div class="divider-top"></div>
@@ -183,6 +190,7 @@ export default {
       starChartType: Math.random() > 0.5 ? 'nav' : 'planet',
       chartOrPostType: 'chart',
       pendingGates: 0,
+      focus: (() => { try { return localStorage.getItem('lcars-focus') === 'true' } catch (err) { return false } })(),
     }
   },
   computed: {
@@ -213,7 +221,20 @@ export default {
   },
   methods: {
     incrementNumberSequence() {
+      if (this.focus) return  // paused: leave the number table on its current frame
       this.numberSequence++
+    },
+    toggleFocus() {
+      this.focus = !this.focus
+      this.applyFocus()
+      try { localStorage.setItem('lcars-focus', String(this.focus)) } catch (err) { /* private mode */ }
+      if (!this.focus) this.incrementNumberSequence()  // restart the number table
+      sounds.panelBeep08?.play()
+    },
+    applyFocus() {
+      // On <html>, not .screen: the ResizeObserver owns .screen's classes. Also read by
+      // timer-driven components (e.g. StarCoords) that CSS can't pause.
+      document.documentElement.classList.toggle('lcars-paused', this.focus)
     },
     togglePostView(event){
       this.chartOrPostType = this.chartOrPostType === 'post' ? 'chart' : 'post'
@@ -257,6 +278,7 @@ export default {
     }
   },
   mounted() {
+    this.applyFocus()
     initSounds()
     window.addEventListener('lcars:update_numbers_table', this.incrementNumberSequence)
   },
@@ -691,6 +713,20 @@ div.main-content > div.list-post {
 }
 
 /* Keep a view inside the remaining screen height so its own panels scroll */
+/* Focus mode: pause every animation and collapse the top panel */
+html.lcars-paused *,
+html.lcars-paused *::before,
+html.lcars-paused *::after {
+  animation-play-state: paused !important;
+  transition: none !important;
+}
+html.lcars-paused .lcars-type-01 {
+  --lcars-top-section-height: calc(var(--lcars-title-size) + var(--lcars-divider-top-height) + 50px);
+}
+html.lcars-paused .meta-content {
+  display: none !important;
+}
+
 .main-content.fills-screen {
   min-height: 0;
   overflow: hidden;
