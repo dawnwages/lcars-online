@@ -55,6 +55,7 @@
         <CoreList v-if="chartOrPostType === 'post'"/>
         <MissionLog v-if="chartOrPostType === 'missions'" @pending-gates="n => pendingGates = n"/>
       </div>
+      <AnalysisCaveats v-if="chartOrPostType === 'missions'" />
       <footer>
         <LCARSBar align="right" :color-scheme="titleType">
           {{displayLcarsLabel ? lcarsLabel : ''}}
@@ -72,6 +73,7 @@ import NumbersTable from './common/NumbersTable.vue'
 import StarChart from './pages/StarChart.vue'
 import CoreList from './pages/CoreList.vue'
 import MissionLog from './pages/MissionLog.vue'
+import AnalysisCaveats from './common/AnalysisCaveats.vue'
 import { makeRandomLetters, makeRandomNumber, pickRandom } from './utils'
 import { initSounds, sounds } from './assets/sounds'
 
@@ -192,7 +194,8 @@ export default {
     NumbersTable,
     StarChart,
     CoreList,
-    MissionLog
+    MissionLog,
+    AnalysisCaveats
   },
   methods: {
     incrementNumberSequence() {

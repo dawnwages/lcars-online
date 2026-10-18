@@ -1,7 +1,7 @@
 <template>
   <aside class="caveats" :class="{ open }">
     <button class="caveats-toggle" @click="open = !open" :aria-expanded="open">
-      {{ open ? '▾' : '▸' }} Disclaimer: what an expert would critique
+      {{ open ? '▾' : '▴' }} Disclaimer: what an expert would critique
     </button>
     <div v-if="open" class="caveats-body">
       <p class="lede">
@@ -53,43 +53,48 @@ const CAVEATS = [
 export default {
   name: 'analysis-caveats',
   data() {
-    let open = true
-    try { open = localStorage.getItem('lcars-caveats-open') !== 'false' } catch (err) { /* private mode */ }
-    return { open, caveats: CAVEATS }
-  },
-  watch: {
-    open(value) {
-      try { localStorage.setItem('lcars-caveats-open', String(value)) } catch (err) { /* ignore */ }
-    }
+    // An accordion: collapsed by default, its title always visible
+    return { open: false, caveats: CAVEATS }
   }
 }
 </script>
 
 <style scoped>
 .caveats {
-  margin: 8px 0;
-  border-left: 10px solid var(--lcars-color-b3);
-  border-radius: 10px 0 0 10px;
+  position: fixed;
+  left: 20px;
+  right: 20px;
+  bottom: 0;
+  z-index: 20;
   background: #151515;
-  padding: 4px 10px;
+  border-top: 6px solid var(--lcars-color-b3);
+  border-radius: 18px 18px 0 0;
   font-family: system-ui, sans-serif;
   text-transform: none;
   color: #ccc;
-  font-size: 13px;
+  font-size: 14px;
+  box-shadow: 0 -6px 18px rgba(0, 0, 0, 0.6);
 }
 .caveats-toggle {
+  width: 100%;
   background: none;
   border: 0;
-  padding: 2px 0;
+  padding: 6px 18px;
   cursor: pointer;
   font-family: 'lcars', sans-serif;
   text-transform: uppercase;
-  font-size: 18px;
+  font-size: 20px;
   color: var(--lcars-color-b3);
   text-align: left;
 }
-.lede { margin: 2px 0 4px; color: #aaa; }
-ul { margin: 0 0 4px; padding-left: 18px; }
-li { margin: 3px 0; line-height: 1.35; }
+.caveats-toggle:hover { color: var(--lcars-color-b1); }
+.caveats-body {
+  max-height: 45vh;
+  overflow-y: auto;
+  padding: 0 18px 12px;
+}
+.lede { margin: 2px 0 6px; color: #aaa; }
+ul { margin: 0; padding-left: 18px; columns: 2 360px; column-gap: 28px; }
+li { margin: 0 0 8px; line-height: 1.4; break-inside: avoid; }
 b { color: var(--lcars-color-b1); font-weight: 600; }
 </style>
